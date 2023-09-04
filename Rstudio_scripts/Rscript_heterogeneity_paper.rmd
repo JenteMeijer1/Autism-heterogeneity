@@ -1,0 +1,2282 @@
+---
+title: "Subtyping autism and normative model of CT "
+author: "J. Meijer"
+date: "23/05/2023"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    df_print: paged
+    keep_md: no
+  html_notebook:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    theme: cosmo
+    number_selection: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+Some common notes that should be considered when running this script:
+-Make sure you run the libraries. Some functions will not give an error
+but do not work properly. - We switch between using R and python. When
+loading something specific from the model is not working, it probably
+has not been run on python yet.
+
+# Setup R
+
+```{r setup-chunk, setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(
+  dev = "png",
+  dpi = 300,
+  cache = TRUE,
+  fig.height = 15,
+  fig.width = 30
+)
+```
+
+## Install packages
+
+Uncomment if need to install again
+
+```{r install packages, include=FALSE}
+# install.packages("dplyr")
+# install.packages("ggplot2")
+# install.packages("car")
+# install.packages("rgl")
+# install.packages("plotly")
+# install.packages("janitor")
+# install.packages("data.table")
+# install.packages("GGally")
+# install.packages("mclust")
+# install.packages("fpc")
+# install.packages("igraph")
+# install.packages("Hmisc")
+# install.packages("knitr)
+# install.packages("devtools")
+# install.packages("styler")
+# install.packages("ggsignif")
+# install.packages("crayon")
+# install.packages("caret")
+# install.packages("fpc")
+# install.packages("flux")
+# install.packages("rstatix")
+# install.packages("ggseg")
+# install.packages("stringdist")
+
+library(ggplot2)
+library(ggseg)
+library(stats)
+library(car)
+library(rgl)
+library(plotly)
+library(janitor)
+library(data.table)
+library(GGally)
+library(fpc)
+library(igraph)
+library(Hmisc)
+library(stats)
+library(knitr)
+library(devtools)
+library(styler)
+library(ggsignif)
+library(crayon)
+library(readr)
+library(clusterpval)
+library(tidyverse)
+library(extRemes)
+library(mclust)
+library(caret)
+library(fpc)
+library(flux)
+library(rstatix)
+library(dplyr)
+library(stringdist)
+library(RColorBrewer)
+
+
+```
+
+# Phenotypic data
+
+In this part of the script, the dataframes are prepared and the
+clustering is performed.
+
+## Prepare data
+
+### Load phenotypic data and prepare data
+
+First, load phenotypic data for ABIDE 1 and ABIDE 2.
+
+```{r loading phenotypic data, cache=TRUE}
+ABIDE1_pheno <- read.csv("/Volumes/methlab/Students/Jente/Data/Phenotypic/Phenotypic_V1_0b.csv")
+ABIDE2_pheno <- read.csv("/Volumes/methlab/Students/Jente/Data/Phenotypic/ABIDEII_Composite_Phenotypic.csv", header = TRUE)
+```
+
+In the data there are some extreme negative values (-9999). Change these
+numbers to NAs.
+
+```{r minus to NAs, cache=TRUE}
+ABIDE1_pheno[ABIDE1_pheno < 0] <- NA
+ABIDE2_pheno[ABIDE2_pheno < 0] <- NA
+```
+
+First select the variables we will need and build a dataframe with only
+these variables
+
+```{r select variables, cache=TRUE}
+variables1 <- c("SITE_ID", "SUB_ID", "DX_GROUP", "DSM_IV_TR", "AGE_AT_SCAN", "SEX", "FIQ", "FIQ_TEST_TYPE", "ADI_R_RSRCH_RELIABLE", "ADOS_MODULE", "ADOS_RSRCH_RELIABLE", "ADOS_TOTAL", "ADOS_COMM", "ADOS_SOCIAL", "ADOS_STEREO_BEHAV", "ADOS_GOTHAM_SEVERITY")
+
+variables2 <- c("SITE_ID", "SUB_ID", "DX_GROUP", "PDD_DSM_IV_TR", "AGE_AT_SCAN", "SEX", "FIQ", "FIQ_TEST_TYPE","ADI_R_RSRCH_RELIABLE", "ADOS_MODULE", "ADOS_RSRCH_RELIABLE", "ADOS_G_TOTAL", "ADOS_G_COMM", "ADOS_G_SOCIAL", "ADOS_G_STEREO_BEHAV", "ADOS_2_SEVERITY_TOTAL")
+
+ABIDE1_pheno_clean <- ABIDE1_pheno[, (names(ABIDE1_pheno) %in% variables1)]
+ABIDE2_pheno_clean <- ABIDE2_pheno[, (names(ABIDE2_pheno) %in% variables2)]
+
+# Reorder columns so they are similar for both dataframes.
+col_order1 <- variables1
+col_order2 <- variables2
+
+ABIDE1_pheno_clean <- ABIDE1_pheno_clean[, col_order1]
+ABIDE2_pheno_clean <- ABIDE2_pheno_clean[, col_order2]
+
+```
+
+In the data set, there is a column that note if the data is acquired
+reliably. There are a few that are not and therefore we will remove
+these subjects. Done by filtering on data where the column is either
+reliable (1) or not defined (NA).
+
+```{r remove unreliable, cache=TRUE}
+#Number exclusions. Only ASD
+length(na.omit(ABIDE1_pheno_clean$SUB_ID[ABIDE1_pheno_clean$ADOS_RSRCH_RELIABLE == 0 | ABIDE1_pheno_clean$ADI_R_RSRCH_RELIABLE == 0 ])) + length(na.omit(ABIDE2_pheno_clean$SUB_ID[ABIDE2_pheno_clean$ADOS_RSRCH_RELIABLE == 0 | ABIDE2_pheno_clean$ADI_R_RSRCH_RELIABLE == 0])) 
+
+# Filter data
+ABIDE1_pheno_clean <- filter(ABIDE1_pheno_clean, ABIDE1_pheno_clean$ADOS_RSRCH_RELIABLE == 1 | is.na(ABIDE1_pheno_clean$ADOS_RSRCH_RELIABLE))
+ABIDE1_pheno_clean <- filter(ABIDE1_pheno_clean, ABIDE1_pheno_clean$ADI_R_RSRCH_RELIABLE == 1 | is.na(ABIDE1_pheno_clean$ADI_R_RSRCH_RELIABLE))
+ABIDE2_pheno_clean <- filter(ABIDE2_pheno_clean, ABIDE2_pheno_clean$ADOS_RSRCH_RELIABLE == 1 | is.na(ABIDE2_pheno_clean$ADOS_RSRCH_RELIABLE))
+ABIDE2_pheno_clean <- filter(ABIDE2_pheno_clean, ABIDE2_pheno_clean$ADI_R_RSRCH_RELIABLE == 1 | is.na(ABIDE2_pheno_clean$ADI_R_RSRCH_RELIABLE))
+```
+
+Combine ABIDE 1 and 2 into 1 data set
+
+```{r combine ABIDE 1 and 2}
+# Change names dataframes so we can change the column names without changing the original dataframes
+forcom1 <- ABIDE1_pheno_clean
+forcom2 <- ABIDE2_pheno_clean
+
+# change column names
+colnames(forcom2) <- colnames(forcom1)
+
+# combine the datasets
+ABIDE_pheno_clean <- rbind(forcom1, forcom2)
+```
+
+### Exclusion
+
+We will remove all women due to uneven distribution of women across
+sites.
+
+```{r remove women, cache=TRUE}
+## Numbers exclusion. Total and per DX_group
+length(ABIDE_pheno_clean$SUB_ID[ABIDE_pheno_clean$SEX==2])
+length(ABIDE_pheno_clean$SUB_ID[ABIDE_pheno_clean$SEX==2 & ABIDE_pheno_clean$DX_GROUP==1]) #ASD
+length(ABIDE_pheno_clean$SUB_ID[ABIDE_pheno_clean$SEX==2 & ABIDE_pheno_clean$DX_GROUP==2]) #TC
+
+# Filter on data where sex=1 which is male according to the legend.
+ABIDE_pheno_clean <- filter(ABIDE_pheno_clean, ABIDE_pheno_clean$SEX == 1)
+```
+
+We can't subgroup TC since they do not have any scores for the clinical
+tests. So here we select only participants with autism.
+
+```{r select autism, cache=TRUE}
+ABIDE_pheno_autism <- subset(ABIDE_pheno_clean, DX_GROUP == 1)
+```
+
+### Normalize clinical scores
+
+Since the scores of the clinical outcomes are all on different scales,
+we will normalize them so that one score does not weight heavier than
+another score during clustering.
+
+```{r Normalization, cache=TRUE}
+dataforclust <- ABIDE_pheno_autism
+
+for (i in 12:(ncol(dataforclust))) { # Loop through the columns that we want to normalize
+  
+  name <- paste(colnames(dataforclust)[i], "_zscore", sep = "") # Make new name for the new column where the z-scores are stored
+  
+  dataforclust[, name] <- (dataforclust[, i] - mean(as.numeric(dataforclust[, i], na.rm = TRUE), na.rm = TRUE)) / sd(dataforclust[, i], na.rm = TRUE) #Calculate and store z-scores
+}
+
+```
+
+## Cluster
+
+First remove all rows with NA's for any of the needed variables.
+
+```{r create dataframe clustering, cache=TRUE}
+# Number exclusions, all ASD
+nrow(dataforclust) - nrow(na.omit(dataforclust[c("ADOS_MODULE", "ADOS_COMM_zscore", "ADOS_SOCIAL_zscore", "ADOS_STEREO_BEHAV_zscore", "ADOS_TOTAL")])) # Missing ADOS
+nrow(dataforclust) - nrow(na.omit(dataforclust["FIQ"])) # Missing FIQ
+
+# Filter
+dataforclust <- na.omit(dataforclust[, c("SITE_ID", "SUB_ID", "AGE_AT_SCAN", "SEX", "FIQ", "ADOS_MODULE", "ADOS_COMM_zscore", "ADOS_SOCIAL_zscore", "ADOS_STEREO_BEHAV_zscore", "ADOS_TOTAL")])
+```
+
+Perform the GLM to account for cofounding effects and store residuals.
+
+```{r GLM, cache=TRUE}
+glm_test <- glm(dataforclust$ADOS_COMM_zscore ~ dataforclust$AGE_AT_SCAN + dataforclust$SITE_ID + dataforclust$FIQ + dataforclust$ADOS_MODULE + dataforclust$ADOS_SOCIAL_zscore + dataforclust$ADOS_STEREO_BEHAV_zscore)
+summary(glm_test)
+dataforclust$ADOS_COMM_zscore_res <- glm_test$residuals
+
+glm_test <- glm(dataforclust$ADOS_SOCIAL_zscore ~ dataforclust$AGE_AT_SCAN + dataforclust$SITE_ID + dataforclust$FIQ + dataforclust$ADOS_MODULE + dataforclust$ADOS_COMM_zscore + dataforclust$ADOS_STEREO_BEHAV_zscore)
+summary(glm_test)
+dataforclust$ADOS_SOCIAL_zscore_res <- glm_test$residuals
+
+glm_test <- glm(dataforclust$ADOS_STEREO_BEHAV_zscore ~ dataforclust$AGE_AT_SCAN + dataforclust$SITE_ID + dataforclust$FIQ + dataforclust$ADOS_MODULE + dataforclust$ADOS_COMM_zscore + dataforclust$ADOS_SOCIAL_zscore)
+summary(glm_test)
+dataforclust$ADOS_STEREO_BEHAV_zscore_res <- glm_test$residuals
+```
+
+### Perform model-based clustering
+
+Here we perform the model-based clustering based on the clinical
+subscores from the ADOS-G.
+
+```{r model cluster, fig.height=10, fig.width=10, cache=TRUE}
+# use cluster algorithm
+clust_test <- Mclust(dataforclust[, c("ADOS_COMM_zscore_res", "ADOS_SOCIAL_zscore_res", "ADOS_STEREO_BEHAV_zscore_res")], verbose = FALSE)
+
+# Save clustering result 
+dataforclust$classification_model <- as.character(clust_test$classification)
+
+# Change classification to character
+dataforclust$classification_model <- as.character(dataforclust$classification_model)
+```
+
+#### Visualize the clusters
+
+```{r compare model clusters, cache=TRUE, fig.height=7, fig.width=7}
+# First we have to make a new dataframe in a long format instead of wide
+newdata1 <- data.frame(dataforclust$SUB_ID, dataforclust$classification_model, dataforclust$ADOS_COMM_zscore_res)
+colnames(newdata1) <- c("SUB_ID", "Group", "Score")
+newdata1$scoretype <- "AODS_COMM_zscore_res"
+
+newdata2 <- data.frame(dataforclust$SUB_ID, dataforclust$classification_model, dataforclust$ADOS_SOCIAL_zscore_res)
+colnames(newdata2) <- c("SUB_ID", "Group", "Score")
+newdata2$scoretype <- "AODS_SOCIAL_zscore_res"
+
+newdata3 <- data.frame(dataforclust$SUB_ID, dataforclust$classification_model, dataforclust$ADOS_STEREO_BEHAV_zscore_res)
+colnames(newdata3) <- c("SUB_ID", "Group", "Score")
+newdata3$scoretype <- "AODS_STEREO_BEHAV_zscore_res"
+
+dataforplot <- rbind(newdata1, newdata2, newdata3)
+
+# Define the plot
+ggplot(dataforplot, aes(x = scoretype, y = Score, fill = Group)) +
+  geom_boxplot(position = position_dodge(width = 0.8), width = 0.6, outlier.shape = NA) +
+  geom_point(position=position_jitterdodge(jitter.width = 0.28, dodge.width=0.8), size=0.0001) +
+  theme_classic() +
+  labs(x = "Subscores", y = "Residuals z-score", title = "Residuals of z-score for each subscore") +
+  scale_x_discrete(labels = c("Communication", "Social", "RRBs")) +
+  scale_fill_manual(values = c("#2e7e9f", "#9cdabc"), name = "Subgroup",
+                    labels = c("Subgroup 1", "Subgroup 2")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 12), text = element_text(size = 18), axis.line.x.bottom = element_line(size = 0.3), axis.line.y = element_line(size = 0.2), axis.text.y = element_text(size = 12)) +
+  ylim(-2.5, 4)
+
+# Save the combined plot
+ggsave("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/Rstudio scripts/Plots/Cluster plots/Combined_Boxplot_Subscores.png")
+```
+
+Cluster plot
+
+```{r model cluster plot, fig.height=8, fig.width=8, cache=TRUE}
+# Get the BIC
+BIC = mclustBIC(dataforclust[, c("ADOS_COMM_zscore_res", "ADOS_SOCIAL_zscore_res", "ADOS_STEREO_BEHAV_zscore_res")])
+
+# Save current par settings
+old_par <- par()
+
+# Set new par settings with adjusted font size
+par(cex.axis = 1.3)
+
+# Plot the BIC values
+plot.mclustBIC(BIC, legendArgs = list(x = "bottomleft"))
+
+# Restore original par settings
+par(old_par)
+
+#Save file
+png(file = "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/Rstudio scripts/Plots/Cluster plots/Clusterplot.png", width = 8, height = 8, units = "in", res = 1000)
+old_par <- par()
+par(cex.axis = 1.3)
+plot.mclustBIC(BIC, legendArgs = list(x = "bottomleft"))
+par(old_par)
+# Close the PNG device
+dev.off()
+
+```
+
+#### Test the clusters for significance
+
+We test significance by using the clusterpval packages.
+
+```{r significance model clusters, cache=TRUE}
+set.seed(1)
+
+# Make function for clustering, needed for the significance function
+model_cluster <- function(X) {
+  mc <- Mclust(X, verbose = FALSE)
+  return(mc$classification)
+}
+
+X <- as.matrix(dataforclust[, c("ADOS_COMM_zscore_res", "ADOS_SOCIAL_zscore_res", "ADOS_STEREO_BEHAV_zscore_res")])
+rownames(X) <- NULL
+cl <- model_cluster(X)
+
+#Test significance
+Sig_model <- test_clusters_approx(X, k1 = 1, k2 = 2, cl_fun = model_cluster, cl = cl, ndraws = 10000)
+
+#Show significance
+Sig_model
+```
+
+#### Test significance sub-scores
+
+```{r}
+p_comm = wilcox.test(dataforclust$ADOS_COMM_zscore_res[dataforclust$classification_model==1], dataforclust$ADOS_COMM_zscore_res[dataforclust$classification_model==2])
+p_soc = wilcox.test(dataforclust$ADOS_SOCIAL_zscore_res[dataforclust$classification_model==1], dataforclust$ADOS_SOCIAL_zscore_res[dataforclust$classification_model==2])
+p_RRB = wilcox.test(dataforclust$ADOS_STEREO_BEHAV_zscore_res[dataforclust$classification_model==1], dataforclust$ADOS_STEREO_BEHAV_zscore_res[dataforclust$classification_model==2])
+
+p_comm
+median(dataforclust$ADOS_COMM_zscore_res[dataforclust$classification_model==1])
+IQR(dataforclust$ADOS_COMM_zscore_res[dataforclust$classification_model==1])
+
+p_soc
+median(dataforclust$ADOS_SOCIAL_zscore_res[dataforclust$classification_model==1])
+IQR(dataforclust$ADOS_SOCIAL_zscore_res[dataforclust$classification_model==1])
+
+p_RRB
+median(dataforclust$ADOS_STEREO_BEHAV_zscore_res[dataforclust$classification_model==1])
+IQR(dataforclust$ADOS_STEREO_BEHAV_zscore_res[dataforclust$classification_model==1])
+
+p.adjust(c(p_comm$p.value, p_soc$p.value, p_RRB$p.value), method="fdr")
+
+```
+
+#### Stability analysis
+
+To see if the clusters are stable, use a bootstrap analysis with 10000
+repetitions. If the clusters change a lot, this could indicate instable
+clusters. The Jaccard similarity has to be above 0.75 to be a stable
+cluster.
+
+```{r stability analysis cluster, cache=TRUE}
+set.seed(1)
+
+model_cluster_boot <- function(X) {
+  mc <- Mclust(X, verbose = FALSE)
+  
+  clustering_result <- list(mc)  # Adjust this line based on the actual output of Mclust()
+  
+  nc <- mc$G  # Number of clusters, including noise (if present)
+  nccl <- nc  # Number of clusters excluding noise
+  
+  cluster_list <- list()
+  for (i in 1:nccl) {
+    cluster_list[[i]] <- mc$classification == i
+  }
+  
+  partition <- mc$classification
+  if (nc > nccl) {
+    # If noise cluster is present
+    cluster_list[[nc]] <- mc$classification == 0  # Assume noise cluster is labeled as 0
+    partition <- ifelse(partition == 0, nc, partition)
+  }
+  
+  clustermethod <- "Mclust"  # Adjust the clustering method name
+  
+  result <- list(
+    clustering_result = clustering_result,
+    nc = nc,
+    nccl = nccl,
+    clusterlist = cluster_list,
+    partition = partition,
+    clustermethod = clustermethod
+  )
+  
+  return(result)
+}
+
+b = clusterboot(data = X, B = 10000, clustermethod = model_cluster_boot)
+
+b
+
+```
+
+## Compare clusters on demographics
+
+```{r Demographic differences clusters}
+# Difference in age
+## assumptions:
+qqnorm(dataforclust$AGE_AT_SCAN)
+qqline(dataforclust$AGE_AT_SCAN, col = "red")
+
+# not normally distributed so use non parametric test: Man Whitney wilcox test
+wilcox.test(dataforclust$AGE_AT_SCAN[dataforclust$classification_model == 1], dataforclust$AGE_AT_SCAN[dataforclust$classification_model == 2])
+
+#Plot age for each subtype
+ggplot(dataforclust, aes(x = classification_model, y = AGE_AT_SCAN)) +
+  geom_boxplot(aes(fill = classification_model)) +
+  theme_classic() +
+  labs(x = "Subscores", y = "Age", title = "Age in both subgroups") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), text = element_text(size = 20)) +
+  geom_jitter(size = 0.2) +
+  scale_fill_manual(values = c("#5b78e2", "#b30d2e"), name = "Subgroups", labels = c("Subgroup 1", "Subgroup 2"))
+
+ggsave("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/Rstudio scripts/Plots/Cluster plots/Demo_age_subtypes.png")
+
+# Differene in IQ
+## assumptions:
+qqnorm(dataforclust$FIQ)
+qqline(dataforclust$FIQ, col = "red")
+
+wilcox.test(dataforclust$FIQ[dataforclust$classification_model == 1], dataforclust$FIQ[dataforclust$classification_model == 2])
+
+#Plot the IQ for each subtype
+ggplot(dataforclust, aes(x = classification_model, y = FIQ)) +
+  geom_boxplot(aes(fill = classification_model)) +
+  theme_classic() +
+  labs(x = "Subscores", y = "FIQ", title = "FIQ in both subgroups") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), text = element_text(size = 20)) +
+  geom_jitter(size = 0.2) +
+  scale_fill_manual(values = c("#5b78e2", "#b30d2e"), name = "Subgroups", labels = c("Subgroup 1", "Subgroup 2"))
+
+ggsave("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/Rstudio scripts/Plots/Cluster plots/Demo_IQ_subtypes.png")
+
+
+# Difference in module
+test_demo <- merge(dataforclust, ABIDE_pheno_clean, by = "SUB_ID") # Merge back with full dataframe to get info about modules.
+
+# Change module to character
+test_demo$ADOS_MODULE.x <- as.character(test_demo$ADOS_MODULE.x)
+
+# Test significance
+chisq.test(table(test_demo$classification_model, test_demo$ADOS_MODULE.x))
+
+# Count how often each count happens in each cluster
+data_modules <- test_demo %>%
+  group_by(classification_model, ADOS_MODULE.x) %>%
+  summarise(Freq = n())
+
+# Change to percentage for easier visualisation
+data_modules$perc <- 0
+data_modules$perc[data_modules$classification_model == 1] <- data_modules$Freq[data_modules$classification_model == 1] / length(test_demo$SUB_ID[test_demo$classification_model == 1]) * 100
+data_modules$perc[data_modules$classification_model == 2] <- data_modules$Freq[data_modules$classification_model == 2] / length(test_demo$SUB_ID[test_demo$classification_model == 2]) * 100
+
+#Plot the modules for each subtype
+ggplot(data_modules, # Grouped barplot using ggplot2
+  aes(x = classification_model, y = perc,fill = ADOS_MODULE.x)) +
+  geom_bar(stat = "identity",position = "dodge") + 
+  theme_classic() +
+  labs(x = "Subgroup", y ="Percentage", title = "Percentage of modules in each subgroup") +
+  scale_fill_manual(values = c("#a82393","#5b78e2", "#b30d2e"), name = "Module")
+
+ggsave("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/Rstudio scripts/Plots/Cluster plots/Demo_modules_subtypes.png")
+
+```
+
+# Brain data
+
+Now that we finished our clustering, we can use brain data for the
+normative model. The normative model will be done in python. However, we
+will here start preparing the data. Then we load the results from the
+normative model and perform analysis in following sections.
+
+## Load and prepare dataframes
+
+```{r load brain data, cache=TRUE}
+# First the EULER number
+## ABIDE 1
+EULER_lh_ABIDE1 <- read.csv("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE1_new/EULER_lh_ABIDE1.csv")
+EULER_rh_ABIDE1 <- read.csv("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE1_new/EULER_rh_ABIDE1.csv")
+
+#Change column names
+colnames(EULER_lh_ABIDE1) <- c("SUB_ID", "EULER_lh")
+colnames(EULER_rh_ABIDE1) <- c("SUB_ID", "EULER_rh")
+
+#Merge left and right and remove NAs
+EULER_ABIDE1 <- merge(EULER_lh_ABIDE1, EULER_rh_ABIDE1, by = "SUB_ID") # Merge left and right hemisphere to one dataset
+EULER_ABIDE1 <- na.omit(EULER_ABIDE1)
+
+EULER_ABIDE1 <- unique(EULER_ABIDE1) # Remove duplicate rows
+
+# Compute mean EULER
+EULER_ABIDE1$meanEULER <- rowMeans(EULER_ABIDE1[, c("EULER_lh", "EULER_rh")])
+
+
+# ABIDE 2
+EULER_lh_ABIDE2 <- read.csv("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE2/EULER_lh_ABIDE2.csv")
+EULER_rh_ABIDE2 <- read.csv("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE2/EULER_rh_ABIDE2.csv")
+
+#Change column names
+colnames(EULER_lh_ABIDE2) <- c("SUB_ID", "EULER_lh")
+colnames(EULER_rh_ABIDE2) <- c("SUB_ID", "EULER_rh")
+
+#Merge left and right and remove NAs
+EULER_ABIDE2 <- merge(EULER_lh_ABIDE2, EULER_rh_ABIDE2, by = "SUB_ID") # Merge left and right hemisphere to one dataset
+EULER_ABIDE2 <- na.omit(EULER_ABIDE2)
+
+EULER_ABIDE2 <- unique(EULER_ABIDE2) # Remove duplicate rows
+
+#Exclude longitudinal data
+exclude_ID_long <- c(50002,50005,50006,50007,50013,50026,50027,50028,50029,50031,50035,50038,50047,50048,50049,50050,50051) #Vector with SUB_ID that need to be excluded
+EULER_ABIDE2 <- filter(EULER_ABIDE2, !(EULER_ABIDE2$SUB_ID %in% exclude_ID_long)) #Filter these subjects out
+
+# Compute mean EULER
+EULER_ABIDE2$meanEULER <- rowMeans(EULER_ABIDE2[, c("EULER_lh", "EULER_rh")])
+
+
+# Load cortical thickness
+# ABIDE1
+CT_lh_Destrieux_ABIDE1 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE1_new/CT_lh_Destrieux_ABIDE1.txt")
+CT_rh_Destrieux_ABIDE1 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE1_new/CT_rh_Destrieux_ABIDE1.txt")
+
+#Change column names
+colnames(CT_lh_Destrieux_ABIDE1)[1] <- c("SUB_ID")
+colnames(CT_rh_Destrieux_ABIDE1)[1] <- c("SUB_ID")
+
+#Merge left and right
+CT_Destrieux_ABIDE1 <- merge(CT_lh_Destrieux_ABIDE1, CT_rh_Destrieux_ABIDE1, by = "SUB_ID")
+
+
+# ABIDE 2
+CT_lh_Destrieux_ABIDE2 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE2/CT_lh_Destrieux_ABIDE2.txt")
+CT_rh_Destrieux_ABIDE2 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE2/CT_rh_Destrieux_ABIDE2.txt")
+
+#Change column names
+colnames(CT_lh_Destrieux_ABIDE2)[1] <- c("SUB_ID")
+colnames(CT_rh_Destrieux_ABIDE2)[1] <- c("SUB_ID")
+
+#Merge left and right
+CT_Destrieux_ABIDE2 <- merge(CT_lh_Destrieux_ABIDE2, CT_rh_Destrieux_ABIDE2, by = "SUB_ID")
+
+#Exclude longitudinal data
+CT_Destrieux_ABIDE2 <- filter(CT_Destrieux_ABIDE2, !(CT_Destrieux_ABIDE2$SUB_ID %in% exclude_ID_long)) #Filter these subjects out
+
+
+# Load subcortical volumes
+# ABIDE1
+subVOl_ABIDE1 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE1_new/aseg_stats.txt")
+
+#Change column names
+colnames(subVOl_ABIDE1)[1] <- c("SUB_ID")
+
+
+# ABIDE 2
+subVOl_ABIDE2 <- read.delim("/Volumes/methlab/Students/Jente/Data/OutputFreeSurfer/ABIDE2/aseg_stats.txt")
+
+#Change column names
+colnames(subVOl_ABIDE2)[1] <- c("SUB_ID")
+
+#Exclude longitudinal data
+subVOl_ABIDE2 <- filter(subVOl_ABIDE2, !(subVOl_ABIDE2$SUB_ID %in% exclude_ID_long)) #Filter these subjects out
+```
+
+We will exclude all participants with an Euler number smaller than -300.
+
+```{r remove participants with bad quality, cache=TRUE}
+# Count number exclusions
+## Total
+length(EULER_ABIDE1$SUB_ID[EULER_ABIDE1$meanEULER < -300]) + length(EULER_ABIDE2$SUB_ID[EULER_ABIDE2$meanEULER < -300])
+
+## Per diagnostic group
+length(EULER_ABIDE1$SUB_ID[EULER_ABIDE1$meanEULER < -300 & EULER_ABIDE1$SUB_ID %in% ABIDE1_pheno$SUB_ID[ABIDE1_pheno$DX_GROUP==1]]) + length(EULER_ABIDE2$SUB_ID[EULER_ABIDE2$meanEULER < -300 & EULER_ABIDE2$SUB_ID %in% ABIDE2_pheno$SUB_ID[ABIDE2_pheno$DX_GROUP==1]]) #ASD
+
+length(EULER_ABIDE1$SUB_ID[EULER_ABIDE1$meanEULER < -300 & EULER_ABIDE1$SUB_ID %in% ABIDE1_pheno$SUB_ID[ABIDE1_pheno$DX_GROUP==2]]) + length(EULER_ABIDE2$SUB_ID[EULER_ABIDE2$meanEULER < -300 & EULER_ABIDE2$SUB_ID %in% ABIDE2_pheno$SUB_ID[ABIDE2_pheno$DX_GROUP==2]]) #TC
+
+
+# ABIDE1
+sub_keep <- EULER_ABIDE1$SUB_ID[EULER_ABIDE1$meanEULER > -300] # Create vector of subject numbers that are included
+CT_Destrieux_ABIDE1 <- filter(CT_Destrieux_ABIDE1, CT_Destrieux_ABIDE1$SUB_ID %in% sub_keep) #Filter on subjects that are included
+subVOl_ABIDE1 <- filter(subVOl_ABIDE1, subVOl_ABIDE1$SUB_ID %in% sub_keep) #Filter on subjects that are included
+
+# ABIDE 2
+sub_keep <- EULER_ABIDE2$SUB_ID[EULER_ABIDE2$meanEULER > -300] # Create vector of subject numbers that are included
+CT_Destrieux_ABIDE2 <- filter(CT_Destrieux_ABIDE2, CT_Destrieux_ABIDE2$SUB_ID %in% sub_keep) #Filter on subjects that are included
+subVOl_ABIDE2 <- filter(subVOl_ABIDE2, subVOl_ABIDE2$SUB_ID %in% sub_keep) #Filter on subjects that are included
+```
+
+Create data for striatum
+
+```{r, cache=TRUE}
+#Combine putamen and caudate to get striatum volume
+subVOl_ABIDE1$Left.Striatum = subVOl_ABIDE1$Left.Caudate + subVOl_ABIDE1$Left.Putamen
+subVOl_ABIDE1$Right.Striatum = subVOl_ABIDE1$Right.Caudate + subVOl_ABIDE1$Right.Putamen
+
+CT_Destrieux_ABIDE1 <- merge(CT_Destrieux_ABIDE1, EULER_ABIDE1, by = "SUB_ID")
+subVOl_ABIDE1 <- merge(subVOl_ABIDE1, EULER_ABIDE1, by = "SUB_ID")
+
+#Combine putamen and caudate to get striatum volume
+subVOl_ABIDE2$Left.Striatum = subVOl_ABIDE2$Left.Caudate + subVOl_ABIDE2$Left.Putamen
+subVOl_ABIDE2$Right.Striatum = subVOl_ABIDE2$Right.Caudate + subVOl_ABIDE2$Right.Putamen
+
+CT_Destrieux_ABIDE2 <- merge(CT_Destrieux_ABIDE2, EULER_ABIDE2, by = "SUB_ID")
+subVOl_ABIDE2 <- merge(subVOl_ABIDE2, EULER_ABIDE2, by="SUB_ID")
+
+```
+
+Merge dataframes and select needed data.
+
+```{r, cache=TRUE}
+# Merge datasets
+CT_Destrieux <- rbind(CT_Destrieux_ABIDE1, CT_Destrieux_ABIDE2)
+subVOl <- rbind(subVOl_ABIDE1, subVOl_ABIDE2)
+
+
+# Delete unneeded columns
+CT_Destrieux <- subset(CT_Destrieux, select = -c(BrainSegVolNotVent.x, eTIV.x, BrainSegVolNotVent.y, eTIV.y))
+
+subVOl <- subset(subVOl, select = -c(Left.Lateral.Ventricle, Left.Inf.Lat.Vent, X3rd.Ventricle, X4th.Ventricle, CSF, Left.vessel, Left.choroid.plexus, Right.Lateral.Ventricle, Right.Inf.Lat.Vent, Right.vessel, Right.choroid.plexus, X5th.Ventricle, WM.hypointensities, Left.WM.hypointensities, Right.WM.hypointensities, non.WM.hypointensities, Left.non.WM.hypointensities, Right.non.WM.hypointensities, BrainSegVol, BrainSegVolNotVent, lhCortexVol, rhCortexVol,CortexVol,lhCerebralWhiteMatterVol,rhCerebralWhiteMatterVol,CerebralWhiteMatterVol,SubCortGrayVol,TotalGrayVol,SupraTentorialVol,SupraTentorialVolNotVent,MaskVol, BrainSegVol.to.eTIV,MaskVol.to.eTIV,lhSurfaceHoles,rhSurfaceHoles,SurfaceHoles, Optic.Chiasm,CC_Posterior,CC_Mid_Posterior,CC_Central,CC_Mid_Anterior,CC_Anterior,BrainSegVol))
+
+
+#Change order
+column_names <- setdiff(colnames(subVOl), "EstimatedTotalIntraCranialVol")
+subVOl <- subVOl[, c(column_names[1], "EstimatedTotalIntraCranialVol", column_names[-1])]
+
+
+```
+
+Data preparation for normative model:
+
+```{r, cache=TRUE}
+#Name which columns you want to use for the normative model
+cov_normative <- ABIDE_pheno_clean[, c("SUB_ID", "SITE_ID", "DX_GROUP", "AGE_AT_SCAN", "SEX", "FIQ")]
+
+#Merge covariates with brain data
+data_normative_CT <- merge(cov_normative, CT_Destrieux, by = "SUB_ID")
+data_normative_subVOL <- merge(cov_normative, subVOl, by = "SUB_ID")
+
+# Exclude women
+data_normative_CT <- filter(data_normative_CT, data_normative_CT$SEX == 1)
+data_normative_subVOL <- filter(data_normative_subVOL, data_normative_subVOL$SEX == 1)
+
+
+#Get dataframe of participants which have a cortical thickness of 0. We will exclude these. 
+Data_zeros_CT = data_normative_CT[rowSums(data_normative_CT[, 7:156] == 0, na.rm = TRUE) > 0, ] 
+
+## Get exclusion numbers
+nrow(Data_zeros_CT) # total
+length(Data_zeros_CT$SUB_ID[Data_zeros_CT$DX_GROUP==1]) # ASD
+length(Data_zeros_CT$SUB_ID[Data_zeros_CT$DX_GROUP==2]) # TC
+
+data_normative_CT <- filter(data_normative_CT, !(data_normative_CT$SUB_ID %in% Data_zeros_CT$SUB_ID)) # Remove participants with CT of 0.
+
+#Get dataframe of participants which have a cortical thickness of 0. We will exclude these. 
+Data_zeros_subVOL = data_normative_subVOL[rowSums(data_normative_subVOL[, 7:30] == 0, na.rm = TRUE) > 0, ] 
+data_normative_subVOL <- filter(data_normative_subVOL, !(data_normative_subVOL$SUB_ID %in% Data_zeros_subVOL$SUB_ID)) # Remove participants with CT of 0.
+
+```
+
+Export dataset for normative model
+
+```{r export data NM}
+write.table(data_normative_CT, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/Data/Data_normative_Destrieux.txt", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+
+write.table(data_normative_subVOL, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model_subvol/Data/Data_normative_subvol.txt", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+```
+
+# Normative modelling
+
+From this part on we use the data from the normative model. This model
+is run in Python. So make sure you run the model before you start this
+part of the code.
+
+## Load deviation scores from the normative model
+
+```{r Load results normative model}
+Deviation_scores_CT <- read_csv("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/blr/powell/outputs/Deviation_scores.csv", col_types = cols(...1 = col_skip()))
+
+Deviation_scores_subvol <- read_csv("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model_subvol/results/blr/powell/outputs/Deviation_scores.csv", col_types = cols(...1 = col_skip()))
+
+# Merge
+Deviation_scores = merge(Deviation_scores_CT, Deviation_scores_subvol, by="SUB_ID")
+```
+
+Merge with clustering results so we can compare between groups.
+
+```{r merge dev scores with pheno data}
+Brain_data_results <- merge(dataforclust, Deviation_scores, by = "SUB_ID") # Data subgroups
+
+#Also merge with complete dataset so we can compare diagnosis
+Brain_data_results_all = merge(ABIDE_pheno_clean, Deviation_scores, by="SUB_ID") # Data all
+
+#Data for statistics
+
+z_scores = Deviation_scores
+z_scores$group = ifelse(z_scores$SUB_ID %in% ABIDE_pheno_clean$SUB_ID[ABIDE_pheno_clean$DX_GROUP==1], yes = "Autism", no="TC")
+z_scores$group[z_scores$SUB_ID %in% Z_df_1$SUB_ID] =  "Subgroup_1"
+z_scores$group[z_scores$SUB_ID %in% Z_df_2$SUB_ID] =  "Subgroup_2"
+  
+write.table(z_scores, "/Volumes/methlab/Students/Jente/Data/z_scores.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+
+```
+
+## SVM
+
+We will make a dataframe that we will use in the classification in
+python.
+
+```{r dataframe SVM}
+# Make dataframe for SVM
+Data_SVM_TC = filter(Brain_data_results_all, Brain_data_results_all$DX_GROUP==2)
+common_cols <- intersect(colnames(Data_SVM_TC), colnames(Brain_data_results))
+Data_SVM_TC <- Data_SVM_TC[, common_cols]
+Data_SVM_TC$classification_model = "0"
+
+Data_SVM_ASD = Brain_data_results
+common_cols <- intersect(colnames(Data_SVM_TC), colnames(Brain_data_results))
+Data_SVM_ASD <- Data_SVM_ASD[, common_cols]
+
+Data_SVM = rbind(Data_SVM_ASD, Data_SVM_TC)
+
+#Save this dataframe for SVM
+write.table(Data_SVM, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/SVM/Data.csv", append = FALSE, sep=",", dec=".", col.names = TRUE)
+```
+
+## Long format data
+
+Load data from normative model in long format
+
+```{r load Z scores long format}
+Z_df_CT <- read.csv("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/Z_df.csv")
+Z_df_subvol <- read.csv("/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model_subvol/results/Z_df.csv")
+
+Z_df = rbind(Z_df_CT, Z_df_subvol)
+
+# Make column with absolute values of CT
+Z_df$CTabs <- abs(Z_df$CT)
+
+# Filter out exclusions
+Z_df = filter(Z_df, Z_df$SUB_ID %in% Brain_data_results_all$SUB_ID)
+
+write.table(Z_df, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/Z_df.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+```
+
+## P-values for thresholding
+
+For the following analyses and visualisation in python we use a fixed
+threshold so we need the p_values. Then for the sensitivity analysis we
+also use a individual threshold with FDR correction so we also calculate
+the FDR corrected p values.
+
+```{r calculate p values Z-scores}
+#Calculate p values for each Z-score under a normal distribution
+Z_df$pvalue <- pnorm(Z_df$CTabs, lower.tail = FALSE)
+
+#Perform FDR correction for each participant separately
+Z_df <- Z_df %>%
+  group_by(SUB_ID) %>%
+  mutate(pvalue_fdr = p.adjust(pvalue, method = "fdr"))
+```
+
+## Save data for plotting in python
+
+```{r save significance data}
+write.table(Z_df, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/P_df.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+
+```
+
+We want to get brain maps for the different subgroups separately. So
+save the data for each subgroup separately so it's easy to handle in
+python.
+
+```{r data for statistic brain maps subtypes}
+subs_1 <- dataforclust$SUB_ID[dataforclust$classification_model == 1]
+subs_2 <- dataforclust$SUB_ID[dataforclust$classification_model == 2]
+
+Z_df_1 <- subset(Z_df, Z_df$SUB_ID %in% subs_1)
+Z_df_2 <- subset(Z_df, Z_df$SUB_ID %in% subs_2)
+
+write.table(Z_df_1, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/Z_df_subtype1.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+write.table(Z_df_2, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/Z_df_subtype2.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+```
+
+# Main analyses
+
+## Overlap differences
+
+```{r}
+data_z_scores <- z_scores
+
+# remove "lh_MeanThickness_thickness", "rh_MeanThickness_thickness" columns
+data_z_scores <- data_z_scores[, !colnames(data_z_scores) %in% c("lh_MeanThickness_thickness", "rh_MeanThickness_thickness")]
+
+permutation_test <- function(dataset, groups = c("Subgroup_1", "Subgroup_2", "Autism"), threshold = 2.6, n_permutations = 9999) {
+    if (threshold < 0){
+        # threshold has to be positive
+        threshold = -threshold
+        # send warning to user
+        warning("Threshold has to be positive. Threshold was set to ", threshold)
+    }
+
+    # groups from original dataset
+    y_orig = dataset[["group"]]
+    # subset data to exclude the control group
+    subset_data <- dataset[y_orig %in% groups, ]
+
+    # get labels for each group in the subset
+    y = subset_data[["group"]]
+    y_1 = (y == groups[1])
+    y_2 = (y == groups[2])
+
+    # remove group and subject id columns
+    x_data <- subset_data[setdiff(colnames(subset_data), c("group", "SUB_ID"))]
+
+    # compute overlap
+    positive_overlap = ifelse(x_data > threshold, 1, 0)
+    negative_overlap = ifelse(x_data < -threshold, 1, 0)
+    absolute_overlap = positive_overlap + negative_overlap
+    sum_positive_overlap = rowSums(positive_overlap)
+    sum_negative_overlap = rowSums(negative_overlap)
+    sum_absolute_overlap = rowSums(absolute_overlap)
+
+    # Regional overlap statistics
+    r1_abs <- colMeans(absolute_overlap[y_1,]) - colMeans(absolute_overlap)
+    r2_abs <- colMeans(absolute_overlap[y_2,]) - colMeans(absolute_overlap)
+
+    r1_pos <- colMeans(positive_overlap[y_1,]) - colMeans(positive_overlap)
+    r2_pos <- colMeans(positive_overlap[y_2,]) - colMeans(positive_overlap)
+
+    r1_neg <- colMeans(negative_overlap[y_1,]) - colMeans(negative_overlap)
+    r2_neg <- colMeans(negative_overlap[y_2,]) - colMeans(negative_overlap)
+
+    # Global overlap statistics
+    g1_abs <- mean(sum_absolute_overlap[y_1]) - mean(sum_absolute_overlap)
+    g2_abs <- mean(sum_absolute_overlap[y_2]) - mean(sum_absolute_overlap)
+
+    g1_pos <- mean(sum_positive_overlap[y_1]) - mean(sum_positive_overlap)
+    g2_pos <- mean(sum_positive_overlap[y_2]) - mean(sum_positive_overlap)
+
+    g1_neg <- mean(sum_negative_overlap[y_1]) - mean(sum_negative_overlap)
+    g2_neg <- mean(sum_negative_overlap[y_2]) - mean(sum_negative_overlap)
+
+    # Permutation statistics
+    r1_abs_perm <- r2_abs_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_abs), dimnames = list(NULL, colnames(absolute_overlap)))
+    r1_pos_perm <- r2_pos_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_pos), dimnames = list(NULL, colnames(absolute_overlap)))
+    r1_neg_perm <- r2_neg_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_neg), dimnames = list(NULL, colnames(absolute_overlap)))
+    g1_abs_perm <- g2_abs_perm <- rep(NA, n_permutations)
+    g1_pos_perm <- g2_pos_perm <- rep(NA, n_permutations)
+    g1_neg_perm <- g2_neg_perm <- rep(NA, n_permutations)
+
+    for (i in seq_len(n_permutations)) {
+        # permute groups
+        y_p <- sample(y)
+        # get permuted labels for each group
+        y_p1 <- (y_p == groups[1])
+        y_p2 <- (y_p == groups[2])
+
+        # compute permuted statistics
+        r1_abs_perm[i, ] <- colMeans(absolute_overlap[y_p1, ]) - colMeans(absolute_overlap)
+        r2_abs_perm[i, ] <- colMeans(absolute_overlap[y_p2, ]) - colMeans(absolute_overlap)
+
+        r1_pos_perm[i, ] <- colMeans(positive_overlap[y_p1, ]) - colMeans(positive_overlap)
+        r2_pos_perm[i, ] <- colMeans(positive_overlap[y_p2, ]) - colMeans(positive_overlap)
+
+        r1_neg_perm[i, ] <- colMeans(negative_overlap[y_p1, ]) - colMeans(negative_overlap)
+        r2_neg_perm[i, ] <- colMeans(negative_overlap[y_p2, ]) - colMeans(negative_overlap)
+
+        g1_abs_perm[i] <- mean(rowSums(absolute_overlap[y_p1, ])) - mean(rowSums(absolute_overlap))
+        g2_abs_perm[i] <- mean(rowSums(absolute_overlap[y_p2, ])) - mean(rowSums(absolute_overlap))
+
+        g1_pos_perm[i] <- mean(rowSums(positive_overlap[y_p1, ])) - mean(rowSums(positive_overlap))
+        g2_pos_perm[i] <- mean(rowSums(positive_overlap[y_p2, ])) - mean(rowSums(positive_overlap))
+
+        g1_neg_perm[i] <- mean(rowSums(negative_overlap[y_p1, ])) - mean(rowSums(negative_overlap))
+        g2_neg_perm[i] <- mean(rowSums(negative_overlap[y_p2, ])) - mean(rowSums(negative_overlap))
+    }
+
+    # compute p-values
+    r1_abs_pval = (rowSums(t(r1_abs_perm) > (r1_abs)) + 1) / (n_permutations + 1)
+    r2_abs_pval = (rowSums(t(r2_abs_perm) > (r2_abs)) + 1) / (n_permutations + 1)
+
+    r1_pos_pval = (rowSums(t(r1_pos_perm) > (r1_pos)) + 1) / (n_permutations + 1)
+    r2_pos_pval = (rowSums(t(r2_pos_perm) > (r2_pos)) + 1) / (n_permutations + 1)
+
+    r1_neg_pval = (rowSums(t(r1_neg_perm) > (r1_neg)) + 1) / (n_permutations + 1)
+    r2_neg_pval = (rowSums(t(r2_neg_perm) > (r2_neg)) + 1) / (n_permutations + 1)
+
+    g1_abs_pval = (sum((g1_abs_perm) > (g1_abs)) + 1) / (n_permutations + 1)
+    g2_abs_pval = (sum((g2_abs_perm) > (g2_abs)) + 1) / (n_permutations + 1)
+
+    g1_pos_pval = (sum((g1_pos_perm) > (g1_pos)) + 1) / (n_permutations + 1)
+    g2_pos_pval = (sum((g2_pos_perm) > (g2_pos)) + 1) / (n_permutations + 1)
+
+    g1_neg_pval = (sum((g1_neg_perm) > (g1_neg)) + 1) / (n_permutations + 1)
+    g2_neg_pval = (sum((g2_neg_perm) > (g2_neg)) + 1) / (n_permutations + 1)
+    
+    # return list of pval arrays
+    return(
+        list(
+            r1_abs_pval = r1_abs_pval,
+            r2_abs_pval = r2_abs_pval,
+            r1_pos_pval = r1_pos_pval,
+            r2_pos_pval = r2_pos_pval,
+            r1_neg_pval = r1_neg_pval,
+            r2_neg_pval = r2_neg_pval,
+            g1_abs_pval = g1_abs_pval,
+            g2_abs_pval = g2_abs_pval,
+            g1_pos_pval = g1_pos_pval,
+            g2_pos_pval = g2_pos_pval,
+            g1_neg_pval = g1_neg_pval,
+            g2_neg_pval = g2_neg_pval
+        )
+    )
+}
+
+res <- permutation_test(data_z_scores, n_permutations = 9999)
+
+corrected_res <- sapply(res, p.adjust, method = "BH")
+
+
+sapply(corrected_res, min)
+
+sapply(corrected_res[1:6], function(x) names(x)[x < 0.05])
+
+r1_pos = as.data.frame(res[3])
+r1_pos$r1_pos_pval = as.numeric(r1_pos$r1_pos_pval)
+r1_pos$r1_pos_pval = format(r1_pos$r1_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_pos = rownames_to_column(r1_pos,var = "ROI")
+
+write.table(r1_pos, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub1_pos.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_pos = as.data.frame(res[4])
+r2_pos$r2_pos_pval = as.numeric(r2_pos$r2_pos_pval)
+r2_pos$r2_pos_pval = format(r2_pos$r2_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_pos = rownames_to_column(r2_pos,var = "ROI")
+
+write.table(r2_pos, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub2_pos.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r1_neg = as.data.frame(res[5])
+r1_neg$r1_neg_pval = as.numeric(r1_neg$r1_neg_pval)
+r1_neg$r1_neg_pval = format(r1_neg$r1_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_neg = rownames_to_column(r1_neg,var = "ROI")
+
+write.table(r1_neg, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub1_neg.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_neg = as.data.frame(res[6])
+r2_neg$r2_neg_pval = as.numeric(r2_neg$r2_neg_pval)
+r2_neg$r2_neg_pval = format(r2_neg$r2_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_neg = rownames_to_column(r2_neg,var = "ROI")
+
+write.table(r2_neg, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub2_neg.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+
+
+r1_pos_corrected = as.data.frame(corrected_res[3])
+r1_pos_corrected$r1_pos_pval = as.numeric(r1_pos_corrected$r1_pos_pval)
+r1_pos_corrected$r1_pos_pval = format(r1_pos_corrected$r1_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_pos_corrected = rownames_to_column(r1_pos_corrected,var = "ROI")
+
+write.table(r1_pos_corrected, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub1_pos_corrected.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_pos_corrected = as.data.frame(corrected_res[4])
+r2_pos_corrected$r2_pos_pval = as.numeric(r2_pos_corrected$r2_pos_pval)
+r2_pos_corrected$r2_pos_pval = format(r2_pos_corrected$r2_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_pos_corrected = rownames_to_column(r2_pos_corrected,var = "ROI")
+
+write.table(r2_pos_corrected, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub2_pos_corrected.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r1_neg_corrected = as.data.frame(corrected_res[5])
+r1_neg_corrected$r1_neg_pval = as.numeric(r1_neg_corrected$r1_neg_pval)
+r1_neg_corrected$r1_neg_pval = format(r1_neg_corrected$r1_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_neg_corrected = rownames_to_column(r1_neg_corrected,var = "ROI")
+
+write.table(r1_neg_corrected, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub1_neg_corrected.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_neg_corrected = as.data.frame(corrected_res[6])
+r2_neg_corrected$r2_neg_pval = as.numeric(r2_neg_corrected$r2_neg_pval)
+r2_neg_corrected$r2_neg_pval = format(r2_neg_corrected$r2_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_neg_corrected = rownames_to_column(r2_neg_corrected,var = "ROI")
+
+write.table(r2_neg_corrected, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_sub2_neg_corrected.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+```
+
+## Subcortical maps
+
+Overlap
+
+```{r}
+z_scores_subcortical = z_scores[152:175] # Load data
+
+## Load in atlas data provided by ggseg package
+atlas      = as_tibble(aseg)
+
+# Define a manual mapping of original column names to desired region names
+manual_mapping <- c(
+  "Left.Cerebellum.White.Matter" = "Left.cerebellum white matter",
+  "Left.Cerebellum.Cortex" = "Left.cerebellum cortex",
+  "Left.Thalamus" = "Left.thalamus proper",
+  "Left.Caudate" = "Left.caudate",
+  "Left.Putamen" = "Left.putamen",
+  "Left.Pallidum" = "Left.pallidum",
+  "Brain.Stem" = "Brain stem",
+  "Left.Hippocampus" = "Left.hippocampus",
+  "Left.Amygdala" = "Left.amygdala",
+  "Left.Accumbens.area" = "Left.accumbens area",
+  "Left.VentralDC" = "Left.ventral DC",
+  "Right.Cerebellum.White.Matter" = "Right.cerebellum white matter",
+  "Right.Cerebellum.Cortex" = "Right.cerebellum cortex",
+  "Right.Thalamus" = "Right.thalamus proper",
+  "Right.Caudate" = "Right.caudate",
+  "Right.Putamen" = "Right.putamen",
+  "Right.Pallidum" = "Right.pallidum",
+  "Right.Hippocampus" = "Right.hippocampus",
+  "Right.Amygdala" = "Right.amygdala",
+  "Right.Accumbens.area" = "Right.accumbens area",
+  "Right.VentralDC" = "Right.ventral DC",
+  "Left.Striatum" = "Left.striatum",
+  "Right.Striatum" = "Right.striatum",
+  "group" = "group"
+)
+
+# Rename the columns using the manual mapping
+colnames(z_scores_subcortical) <- manual_mapping[colnames(z_scores_subcortical)]
+
+
+
+
+z_scores_subcortical_sub1 = filter(z_scores_subcortical, z_scores_subcortical$group=="Subgroup_1")[1:23]
+z_scores_subcortical_sub2 = filter(z_scores_subcortical, z_scores_subcortical$group=="Subgroup_2")[1:23]
+z_scores_subcortical_ASD = filter(z_scores_subcortical, z_scores_subcortical$group=="Subgroup_1" | z_scores_subcortical$group=="Subgroup_2" | z_scores_subcortical$group=="Autism")[1:23]
+
+# Create a function to calculate the percentage of values above or below a threshold
+calculate_percentage_above_below <- function(x, above_threshold, below_threshold) {
+  above_percentage <- sum(x > above_threshold, na.rm = TRUE) / sum(!is.na(x)) * 100
+  below_percentage <- sum(x < below_threshold, na.rm = TRUE) / sum(!is.na(x)) * 100
+  return(c(above_percentage, below_percentage))
+}
+
+# Calculate the percentages for z-scores above 2.6 and below -2.6
+percentage_sub1 <- data.frame()
+
+for (col_name in colnames(z_scores_subcortical_sub1)) {
+  percentages <- calculate_percentage_above_below(z_scores_subcortical_sub1[[col_name]], 2.6, -2.6)
+  
+  new_row <- data.frame(Column = col_name, `Above_2.6` = percentages[1], `Below_-2.6` = percentages[2])
+  percentage_sub1 <- rbind(percentage_sub1, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_sub1 <- transform(percentage_sub1, 
+                            hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                          ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                            region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_sub1 <- subset(percentage_sub1, select = -Column)
+
+# Calculate the percentages for z-scores above 2.6 and below -2.6
+percentage_sub2 <- data.frame()
+
+for (col_name in colnames(z_scores_subcortical_sub2)) {
+  percentages <- calculate_percentage_above_below(z_scores_subcortical_sub2[[col_name]], 2.6, -2.6)
+  
+  new_row <- data.frame(Column = col_name, `Above_2.6` = percentages[1], `Below_-2.6` = percentages[2])
+  percentage_sub2 <- rbind(percentage_sub2, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_sub2 <- transform(percentage_sub2, 
+                            hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                          ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                            region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_sub2 <- subset(percentage_sub2, select = -Column)
+
+
+# Calculate the percentages for z-scores above 2.6 and below -2.6
+percentage_ASD <- data.frame()
+
+for (col_name in colnames(z_scores_subcortical_ASD)) {
+  percentages <- calculate_percentage_above_below(z_scores_subcortical_ASD[[col_name]], 2.6, -2.6)
+  
+  new_row <- data.frame(Column = col_name, `Above_2.6` = percentages[1], `Below_-2.6` = percentages[2])
+  percentage_ASD <- rbind(percentage_ASD, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_ASD <- transform(percentage_ASD, 
+                            hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                          ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                            region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_ASD <- subset(percentage_ASD, select = -Column)
+
+#We have to change the cerebellum. In atlas only one value and in midline. We'll take the average.
+percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum cortex"] = (percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum cortex" & percentage_ASD$hemi=="left"] +  percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum cortex"& percentage_ASD$hemi=="right"] / 2)
+
+percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum cortex"] = (percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum cortex" & percentage_ASD$hemi=="left"] +  percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum cortex"& percentage_ASD$hemi=="right"] / 2)
+
+percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum white matter"] = (percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum white matter" & percentage_ASD$hemi=="left"] +  percentage_ASD$Above_2.6[percentage_ASD$region=="cerebellum white matter"& percentage_ASD$hemi=="right"] / 2)
+
+percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum white matter"] = (percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum white matter" & percentage_ASD$hemi=="left"] +  percentage_ASD$Below_.2.6[percentage_ASD$region=="cerebellum white matter"& percentage_ASD$hemi=="right"] / 2)
+
+percentage_ASD$hemi[percentage_ASD$region=="cerebellum cortex"]= "midline"
+percentage_ASD$hemi[percentage_ASD$region=="cerebellum white matter"]= "midline"
+
+percentage_ASD = subset(percentage_ASD, !duplicated(percentage_ASD))
+
+
+percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum cortex"] = (percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum cortex" & percentage_sub1$hemi=="left"] +  percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum cortex"& percentage_sub1$hemi=="right"] / 2)
+
+percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum cortex"] = (percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum cortex" & percentage_sub1$hemi=="left"] +  percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum cortex"& percentage_sub1$hemi=="right"] / 2)
+
+percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum white matter"] = (percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum white matter" & percentage_sub1$hemi=="left"] +  percentage_sub1$Above_2.6[percentage_sub1$region=="cerebellum white matter"& percentage_sub1$hemi=="right"] / 2)
+
+percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum white matter"] = (percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum white matter" & percentage_sub1$hemi=="left"] +  percentage_sub1$Below_.2.6[percentage_sub1$region=="cerebellum white matter"& percentage_sub1$hemi=="right"] / 2)
+
+percentage_sub1$hemi[percentage_sub1$region=="cerebellum cortex"]= "midline"
+percentage_sub1$hemi[percentage_sub1$region=="cerebellum white matter"]= "midline"
+
+percentage_sub1 = subset(percentage_sub1, !duplicated(percentage_sub1))
+
+percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum cortex"] = (percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum cortex" & percentage_sub2$hemi=="left"] +  percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum cortex"& percentage_sub2$hemi=="right"] / 2)
+
+percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum cortex"] = (percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum cortex" & percentage_sub2$hemi=="left"] +  percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum cortex"& percentage_sub2$hemi=="right"] / 2)
+
+percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum white matter"] = (percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum white matter" & percentage_sub2$hemi=="left"] +  percentage_sub2$Above_2.6[percentage_sub2$region=="cerebellum white matter"& percentage_sub2$hemi=="right"] / 2)
+
+percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum white matter"] = (percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum white matter" & percentage_sub2$hemi=="left"] +  percentage_sub2$Below_.2.6[percentage_sub2$region=="cerebellum white matter"& percentage_sub2$hemi=="right"] / 2)
+
+percentage_sub2$hemi[percentage_sub2$region=="cerebellum cortex"]= "midline"
+percentage_sub2$hemi[percentage_sub2$region=="cerebellum white matter"]= "midline"
+
+percentage_sub2 = subset(percentage_sub2, !duplicated(percentage_sub2))
+
+
+
+atlas_data_ASD = merge(atlas, percentage_ASD, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_sub1 = merge(atlas, percentage_sub1, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_sub2 = merge(atlas, percentage_sub2, by=c("region", "hemi"), all.x=TRUE)
+
+# Fill missing values with 0 in the columns Above_2.6 and Below_.2.6
+atlas_data_ASD$Above_2.6[is.na(atlas_data_ASD$Above_2.6)] <- 0
+atlas_data_ASD$Below_.2.6[is.na(atlas_data_ASD$Below_.2.6)] <- 0
+atlas_data_sub1$Above_2.6[is.na(atlas_data_sub1$Above_2.6)] <- 0
+atlas_data_sub1$Below_.2.6[is.na(atlas_data_sub1$Below_.2.6)] <- 0
+atlas_data_sub2$Above_2.6[is.na(atlas_data_sub2$Above_2.6)] <- 0
+atlas_data_sub2$Below_.2.6[is.na(atlas_data_sub2$Below_.2.6)] <- 0
+
+# Reorder rows of atlas_data_ASD based on the order in the atlas
+atlas_data_ASD <- atlas_data_ASD[match(paste(atlas$region, atlas$hemi), paste(atlas_data_ASD$region, atlas_data_ASD$hemi)), ]
+atlas_data_sub1 <- atlas_data_sub1[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub1$region, atlas_data_sub1$hemi)), ]
+atlas_data_sub2 <- atlas_data_sub2[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub2$region, atlas_data_sub2$hemi)), ]
+
+## Plot atlas:
+
+# Define the color limits based on the range you want
+color_limits <- c(0, 8)  # Replace with the desired range
+
+# Create a custom color palette with a white-to-blue gradient
+custom_palette <- colorRampPalette(c("white", brewer.pal(8, "GnBu")))(9)
+
+# Positive deviations ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_ASD,
+    mapping = aes(fill = Above_2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_pos_ASD_subcortical.png")
+
+
+# Negative deviations ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_ASD,
+    mapping = aes(fill = Below_.2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_neg_ASD_subcortical.png")
+
+
+# Positive deviations sub1
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub1,
+    mapping = aes(fill = Above_2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_pos_sub1_subcortical.png")
+
+
+# Negative deviations sub1
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub1,
+    mapping = aes(fill = Below_.2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_neg_sub1_subcortical.png")
+
+
+
+# Positive deviations sub2
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub2,
+    mapping = aes(fill = Above_2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_pos_sub2_subcortical.png")
+
+
+# Negative deviations sub2
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub2,
+    mapping = aes(fill = Below_.2.6),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_neg_sub2_subcortical.png")
+
+
+```
+
+p_value maps
+
+```{r}
+p_values_subcortical_sub1vsASD_pos = r1_pos[149:171,] # Load data
+p_values_subcortical_sub1vsASD_neg = r1_neg[149:171,] # Load data
+p_values_subcortical_sub2vsASD_pos = r2_pos[149:171,] # Load data
+p_values_subcortical_sub2vsASD_neg = r2_neg[149:171,] # Load data
+
+
+## Load in atlas data provided by ggseg package
+atlas      = as_tibble(aseg)
+
+# Define a manual mapping of original ROI names to desired region names
+manual_mapping <- c(
+  "Left.Cerebellum.White.Matter" = "Left.cerebellum white matter",
+  "Left.Cerebellum.Cortex" = "Left.cerebellum cortex",
+  "Left.Thalamus" = "Left.thalamus proper",
+  "Left.Caudate" = "Left.caudate",
+  "Left.Putamen" = "Left.putamen",
+  "Left.Pallidum" = "Left.pallidum",
+  "Brain.Stem" = "Brain stem",
+  "Left.Hippocampus" = "Left.hippocampus",
+  "Left.Amygdala" = "Left.amygdala",
+  "Left.Accumbens.area" = "Left.accumbens area",
+  "Left.VentralDC" = "Left.ventral DC",
+  "Right.Cerebellum.White.Matter" = "Right.cerebellum white matter",
+  "Right.Cerebellum.Cortex" = "Right.cerebellum cortex",
+  "Right.Thalamus" = "Right.thalamus proper",
+  "Right.Caudate" = "Right.caudate",
+  "Right.Putamen" = "Right.putamen",
+  "Right.Pallidum" = "Right.pallidum",
+  "Right.Hippocampus" = "Right.hippocampus",
+  "Right.Amygdala" = "Right.amygdala",
+  "Right.Accumbens.area" = "Right.accumbens area",
+  "Right.VentralDC" = "Right.ventral DC",
+  "Left.Striatum" = "Left.striatum",
+  "Right.Striatum" = "Right.striatum",
+  "group" = "group"
+)
+
+# Rename the ROIs using the manual mapping
+p_values_subcortical_sub1vsASD_pos$ROI <- manual_mapping[p_values_subcortical_sub1vsASD_pos$ROI]
+p_values_subcortical_sub1vsASD_neg$ROI <- manual_mapping[p_values_subcortical_sub1vsASD_neg$ROI]
+p_values_subcortical_sub2vsASD_pos$ROI <- manual_mapping[p_values_subcortical_sub2vsASD_pos$ROI]
+p_values_subcortical_sub2vsASD_neg$ROI <- manual_mapping[p_values_subcortical_sub2vsASD_neg$ROI]
+
+
+# Split "ROI" ROI into "hemi" and "region" ROIs
+p_values_subcortical_sub1vsASD_pos <- transform(p_values_subcortical_sub1vsASD_pos, 
+                             hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                           ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                             region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+# Drop the original "ROI" ROI
+p_values_subcortical_sub1vsASD_pos <- subset(p_values_subcortical_sub1vsASD_pos, select = -ROI)
+
+p_values_subcortical_sub1vsASD_neg <- transform(p_values_subcortical_sub1vsASD_neg, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_subcortical_sub1vsASD_neg <- subset(p_values_subcortical_sub1vsASD_neg, select = -ROI)
+
+p_values_subcortical_sub2vsASD_pos <- transform(p_values_subcortical_sub2vsASD_pos, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_subcortical_sub2vsASD_pos <- subset(p_values_subcortical_sub2vsASD_pos, select = -ROI)
+
+p_values_subcortical_sub2vsASD_neg <- transform(p_values_subcortical_sub2vsASD_neg, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_subcortical_sub2vsASD_neg <- subset(p_values_subcortical_sub2vsASD_neg, select = -ROI)
+
+#Change p values to numeric
+p_values_subcortical_sub1vsASD_pos$r1_pos_pval = as.numeric(p_values_subcortical_sub1vsASD_pos$r1_pos_pval)
+p_values_subcortical_sub1vsASD_neg$r1_neg_pval = as.numeric(p_values_subcortical_sub1vsASD_neg$r1_neg_pval)
+p_values_subcortical_sub2vsASD_pos$r2_pos_pval = as.numeric(p_values_subcortical_sub2vsASD_pos$r2_pos_pval)
+p_values_subcortical_sub2vsASD_neg$r2_neg_pval = as.numeric(p_values_subcortical_sub2vsASD_neg$r2_neg_pval)
+
+#We have to change the cerebellum. In atlas only one value and in midline. We'll take the average.
+p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum cortex"] = min(c(p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum cortex" & p_values_subcortical_sub1vsASD_pos$hemi=="left"],  p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum cortex"& p_values_subcortical_sub1vsASD_pos$hemi=="right"]))
+
+p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum cortex"] = min(c(p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum cortex" & p_values_subcortical_sub1vsASD_neg$hemi=="left"], p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum cortex"& p_values_subcortical_sub1vsASD_neg$hemi=="right"]))
+
+p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum cortex"] = min(c(p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum cortex" & p_values_subcortical_sub2vsASD_pos$hemi=="left"], p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum cortex"& p_values_subcortical_sub2vsASD_pos$hemi=="right"]))
+
+p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum cortex"] = min(c(p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum cortex" & p_values_subcortical_sub2vsASD_neg$hemi=="left"],  p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum cortex"& p_values_subcortical_sub2vsASD_neg$hemi=="right"]))
+
+p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum white matter"] = min(c(p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum white matter" & p_values_subcortical_sub1vsASD_pos$hemi=="left"], p_values_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_subcortical_sub1vsASD_pos$region=="cerebellum white matter"& p_values_subcortical_sub1vsASD_pos$hemi=="right"]))
+
+p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum white matter"] = min(c(p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum white matter" & p_values_subcortical_sub1vsASD_neg$hemi=="left"], p_values_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_subcortical_sub1vsASD_neg$region=="cerebellum white matter"& p_values_subcortical_sub1vsASD_neg$hemi=="right"]))
+
+p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum white matter"] = min(c(p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum white matter" & p_values_subcortical_sub2vsASD_pos$hemi=="left"], p_values_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_subcortical_sub2vsASD_pos$region=="cerebellum white matter"& p_values_subcortical_sub2vsASD_pos$hemi=="right"]))
+
+p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum white matter"] = min(c(p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum white matter" & p_values_subcortical_sub2vsASD_neg$hemi=="left"], p_values_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_subcortical_sub2vsASD_neg$region=="cerebellum white matter"& p_values_subcortical_sub2vsASD_neg$hemi=="right"]))
+
+
+
+p_values_subcortical_sub1vsASD_pos$hemi[p_values_subcortical_sub1vsASD_pos$region=="cerebellum cortex"]= "midline"
+p_values_subcortical_sub1vsASD_pos$hemi[p_values_subcortical_sub1vsASD_pos$region=="cerebellum white matter"]= "midline"
+p_values_subcortical_sub1vsASD_neg$hemi[p_values_subcortical_sub1vsASD_neg$region=="cerebellum cortex"]= "midline"
+p_values_subcortical_sub1vsASD_neg$hemi[p_values_subcortical_sub1vsASD_neg$region=="cerebellum white matter"]= "midline"
+p_values_subcortical_sub2vsASD_pos$hemi[p_values_subcortical_sub2vsASD_pos$region=="cerebellum cortex"]= "midline"
+p_values_subcortical_sub2vsASD_pos$hemi[p_values_subcortical_sub2vsASD_pos$region=="cerebellum white matter"]= "midline"
+p_values_subcortical_sub2vsASD_neg$hemi[p_values_subcortical_sub2vsASD_neg$region=="cerebellum cortex"]= "midline"
+p_values_subcortical_sub2vsASD_neg$hemi[p_values_subcortical_sub2vsASD_neg$region=="cerebellum white matter"]= "midline"
+
+p_values_subcortical_sub1vsASD_pos = subset(p_values_subcortical_sub1vsASD_pos, !duplicated(p_values_subcortical_sub1vsASD_pos))
+p_values_subcortical_sub1vsASD_neg = subset(p_values_subcortical_sub1vsASD_neg, !duplicated(p_values_subcortical_sub1vsASD_neg))
+p_values_subcortical_sub2vsASD_pos = subset(p_values_subcortical_sub2vsASD_pos, !duplicated(p_values_subcortical_sub2vsASD_pos))
+p_values_subcortical_sub2vsASD_neg = subset(p_values_subcortical_sub2vsASD_neg, !duplicated(p_values_subcortical_sub2vsASD_neg))
+
+
+
+atlas_data_sub1vsASD_pos = merge(atlas, p_values_subcortical_sub1vsASD_pos, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_sub1vsASD_neg = merge(atlas, p_values_subcortical_sub1vsASD_neg, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_sub2vsASD_pos = merge(atlas, p_values_subcortical_sub2vsASD_pos, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_sub2vsASD_neg = merge(atlas, p_values_subcortical_sub2vsASD_neg, by=c("region", "hemi"), all.x=TRUE)
+
+atlas_data_sub1vsASD_pos$r1_pos_pval[is.na(atlas_data_sub1vsASD_pos$r1_pos_pval)] <- 1
+atlas_data_sub1vsASD_neg$r1_neg_pval[is.na(atlas_data_sub1vsASD_neg$r1_neg_pval)] <- 1
+atlas_data_sub2vsASD_pos$r2_pos_pval[is.na(atlas_data_sub2vsASD_pos$r2_pos_pval)] <- 1
+atlas_data_sub2vsASD_neg$r2_neg_pval[is.na(atlas_data_sub2vsASD_neg$r2_neg_pval)] <- 1
+
+# Reorder rows of atlas_data_ASD based on the order in the atlas
+atlas_data_sub1vsASD_pos <- atlas_data_sub1vsASD_pos[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub1vsASD_pos$region, atlas_data_sub1vsASD_pos$hemi)),]
+atlas_data_sub1vsASD_neg <- atlas_data_sub1vsASD_neg[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub1vsASD_neg$region, atlas_data_sub1vsASD_neg$hemi)),]
+atlas_data_sub2vsASD_pos <- atlas_data_sub2vsASD_pos[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub2vsASD_pos$region, atlas_data_sub2vsASD_pos$hemi)),]
+atlas_data_sub2vsASD_neg <- atlas_data_sub2vsASD_neg[match(paste(atlas$region, atlas$hemi), paste(atlas_data_sub2vsASD_neg$region, atlas_data_sub2vsASD_neg$hemi)),]
+
+## Plot atlas:
+
+# Define the color limits for p-values
+p_value_limits <- c(0.001, 0.05)  # Adjust as needed
+
+# Create a custom color palette using the OrRd_r color palette
+custom_palette <- rev(brewer.pal(9, "OrRd"))
+
+# Positive deviations sub1 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub1vsASD_pos,
+    mapping = aes(fill = r1_pos_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+      oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_pos_ASDvssub1_subcortical.png")
+
+
+
+
+# Negative deviations sub1 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub1vsASD_neg,
+    mapping = aes(fill = r1_neg_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+      oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_neg_ASDvssub1_subcortical.png")
+
+
+# Positive deviations sub2 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub2vsASD_pos,
+    mapping = aes(fill = r2_pos_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_pos_ASDvssub2_subcortical.png")
+
+
+# Negative deviations sub2 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_sub2vsASD_neg,
+    mapping = aes(fill = r2_neg_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_neg_ASDvssub2_subcortical.png")
+
+```
+
+# Sensitivity analyses
+
+## Individual FDR correction
+
+### Prepare data for plots python
+
+```{r}
+ind_FDR = Z_df
+ind_FDR$CT[ind_FDR$pvalue_fdr > 0.05] <- 0 # When the individual FDR p-value is higher than 0.05, we set the CT to 0 so we can use a threhold of >0 for the brain maps.
+
+write.table(ind_FDR, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/individual_FDR.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE)
+
+```
+
+### Statistics overlap maps
+
+```{r}
+ind_FDR$CT[ind_FDR$pvalue_fdr > 0.05] <- 1
+
+# Add a new column combining hemi and ROI
+ind_FDR$ROIname <- paste(ind_FDR$hemi, ind_FDR$ROI, sep = "_")
+#Change to wide format
+data_z_scores_fdr <- ind_FDR %>%
+  select(SUB_ID, ROIname, CT) %>%
+  pivot_wider(names_from = ROIname, values_from = CT, values_fill = NA)
+
+#Name groups
+data_z_scores_fdr$group = ifelse(data_z_scores_fdr$SUB_ID %in% ABIDE_pheno_clean$SUB_ID[ABIDE_pheno_clean$DX_GROUP==1], yes = "Autism", no="TC")
+data_z_scores_fdr$group[data_z_scores_fdr$SUB_ID %in% Z_df_1$SUB_ID] =  "Subgroup_1"
+data_z_scores_fdr$group[data_z_scores_fdr$SUB_ID %in% Z_df_2$SUB_ID] =  "Subgroup_2"
+
+
+# remove "lh_MeanThickness_thickness", "rh_MeanThickness_thickness" columns
+data_z_scores_fdr <- data_z_scores_fdr[, !colnames(data_z_scores_fdr) %in% c("lh_MeanThickness_thickness", "rh_MeanThickness_thickness")]
+
+permutation_test <- function(dataset, groups = c("Subgroup_1", "Subgroup_2", "Autism"), threshold = 1, n_permutations = 9999) {
+  if (threshold < 0){
+    # threshold has to be positive
+    threshold = -threshold
+    # send warning to user
+    warning("Threshold has to be positive. Threshold was set to ", threshold)
+  }
+  
+  # groups from original dataset
+  y_orig = dataset[["group"]]
+  # subset data to exclude the control group
+  subset_data <- dataset[y_orig %in% groups, ]
+  
+  # get labels for each group in the subset
+  y = subset_data[["group"]]
+  y_1 = (y == groups[1])
+  y_2 = (y == groups[2])
+  
+  # remove group and subject id columns
+  x_data <- subset_data[setdiff(colnames(subset_data), c("group", "SUB_ID"))]
+  
+  # compute overlap
+  positive_overlap = ifelse(x_data > threshold, 1, 0)
+  negative_overlap = ifelse(x_data < -threshold, 1, 0)
+  absolute_overlap = positive_overlap + negative_overlap
+  sum_positive_overlap = rowSums(positive_overlap)
+  sum_negative_overlap = rowSums(negative_overlap)
+  sum_absolute_overlap = rowSums(absolute_overlap)
+  
+  # Regional overlap statistics
+  r1_abs <- colMeans(absolute_overlap[y_1,]) - colMeans(absolute_overlap)
+  r2_abs <- colMeans(absolute_overlap[y_2,]) - colMeans(absolute_overlap)
+  
+  r1_pos <- colMeans(positive_overlap[y_1,]) - colMeans(positive_overlap)
+  r2_pos <- colMeans(positive_overlap[y_2,]) - colMeans(positive_overlap)
+  
+  r1_neg <- colMeans(negative_overlap[y_1,]) - colMeans(negative_overlap)
+  r2_neg <- colMeans(negative_overlap[y_2,]) - colMeans(negative_overlap)
+  
+  # Global overlap statistics
+  g1_abs <- mean(sum_absolute_overlap[y_1]) - mean(sum_absolute_overlap)
+  g2_abs <- mean(sum_absolute_overlap[y_2]) - mean(sum_absolute_overlap)
+  
+  g1_pos <- mean(sum_positive_overlap[y_1]) - mean(sum_positive_overlap)
+  g2_pos <- mean(sum_positive_overlap[y_2]) - mean(sum_positive_overlap)
+  
+  g1_neg <- mean(sum_negative_overlap[y_1]) - mean(sum_negative_overlap)
+  g2_neg <- mean(sum_negative_overlap[y_2]) - mean(sum_negative_overlap)
+  
+  # Permutation statistics
+  r1_abs_perm <- r2_abs_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_abs), dimnames = list(NULL, colnames(absolute_overlap)))
+  r1_pos_perm <- r2_pos_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_pos), dimnames = list(NULL, colnames(absolute_overlap)))
+  r1_neg_perm <- r2_neg_perm <- matrix(NA, nrow = n_permutations, ncol = length(r1_neg), dimnames = list(NULL, colnames(absolute_overlap)))
+  g1_abs_perm <- g2_abs_perm <- rep(NA, n_permutations)
+  g1_pos_perm <- g2_pos_perm <- rep(NA, n_permutations)
+  g1_neg_perm <- g2_neg_perm <- rep(NA, n_permutations)
+  
+  for (i in seq_len(n_permutations)) {
+    # permute groups
+    y_p <- sample(y)
+    # get permuted labels for each group
+    y_p1 <- (y_p == groups[1])
+    y_p2 <- (y_p == groups[2])
+    
+    # compute permuted statistics
+    r1_abs_perm[i, ] <- colMeans(absolute_overlap[y_p1, ]) - colMeans(absolute_overlap)
+    r2_abs_perm[i, ] <- colMeans(absolute_overlap[y_p2, ]) - colMeans(absolute_overlap)
+    
+    r1_pos_perm[i, ] <- colMeans(positive_overlap[y_p1, ]) - colMeans(positive_overlap)
+    r2_pos_perm[i, ] <- colMeans(positive_overlap[y_p2, ]) - colMeans(positive_overlap)
+    
+    r1_neg_perm[i, ] <- colMeans(negative_overlap[y_p1, ]) - colMeans(negative_overlap)
+    r2_neg_perm[i, ] <- colMeans(negative_overlap[y_p2, ]) - colMeans(negative_overlap)
+    
+    g1_abs_perm[i] <- mean(rowSums(absolute_overlap[y_p1, ])) - mean(rowSums(absolute_overlap))
+    g2_abs_perm[i] <- mean(rowSums(absolute_overlap[y_p2, ])) - mean(rowSums(absolute_overlap))
+    
+    g1_pos_perm[i] <- mean(rowSums(positive_overlap[y_p1, ])) - mean(rowSums(positive_overlap))
+    g2_pos_perm[i] <- mean(rowSums(positive_overlap[y_p2, ])) - mean(rowSums(positive_overlap))
+    
+    g1_neg_perm[i] <- mean(rowSums(negative_overlap[y_p1, ])) - mean(rowSums(negative_overlap))
+    g2_neg_perm[i] <- mean(rowSums(negative_overlap[y_p2, ])) - mean(rowSums(negative_overlap))
+  }
+  
+  # compute p-values
+  r1_abs_pval = (rowSums(t(r1_abs_perm) > (r1_abs)) + 1) / (n_permutations + 1)
+  r2_abs_pval = (rowSums(t(r2_abs_perm) > (r2_abs)) + 1) / (n_permutations + 1)
+  
+  r1_pos_pval = (rowSums(t(r1_pos_perm) > (r1_pos)) + 1) / (n_permutations + 1)
+  r2_pos_pval = (rowSums(t(r2_pos_perm) > (r2_pos)) + 1) / (n_permutations + 1)
+  
+  r1_neg_pval = (rowSums(t(r1_neg_perm) > (r1_neg)) + 1) / (n_permutations + 1)
+  r2_neg_pval = (rowSums(t(r2_neg_perm) > (r2_neg)) + 1) / (n_permutations + 1)
+  
+  g1_abs_pval = (sum((g1_abs_perm) > (g1_abs)) + 1) / (n_permutations + 1)
+  g2_abs_pval = (sum((g2_abs_perm) > (g2_abs)) + 1) / (n_permutations + 1)
+  
+  g1_pos_pval = (sum((g1_pos_perm) > (g1_pos)) + 1) / (n_permutations + 1)
+  g2_pos_pval = (sum((g2_pos_perm) > (g2_pos)) + 1) / (n_permutations + 1)
+  
+  g1_neg_pval = (sum((g1_neg_perm) > (g1_neg)) + 1) / (n_permutations + 1)
+  g2_neg_pval = (sum((g2_neg_perm) > (g2_neg)) + 1) / (n_permutations + 1)
+  
+  # return list of pval arrays
+  return(
+    list(
+      r1_abs_pval = r1_abs_pval,
+      r2_abs_pval = r2_abs_pval,
+      r1_pos_pval = r1_pos_pval,
+      r2_pos_pval = r2_pos_pval,
+      r1_neg_pval = r1_neg_pval,
+      r2_neg_pval = r2_neg_pval,
+      g1_abs_pval = g1_abs_pval,
+      g2_abs_pval = g2_abs_pval,
+      g1_pos_pval = g1_pos_pval,
+      g2_pos_pval = g2_pos_pval,
+      g1_neg_pval = g1_neg_pval,
+      g2_neg_pval = g2_neg_pval
+    )
+  )
+}
+
+res_fdr <- permutation_test(data_z_scores_fdr, n_permutations = 9999)
+
+corrected_res_fdr <- sapply(res_fdr, p.adjust, method = "BH")
+
+
+
+sapply(corrected_res_fdr, min)
+
+sapply(corrected_res_fdr[1:6], function(x) names(x)[x < 0.05])
+
+r1_pos_ind = as.data.frame(res_fdr[3])
+r1_pos_ind$r1_pos_pval = as.numeric(r1_pos_ind$r1_pos_pval)
+r1_pos_ind$r1_pos_pval = format(r1_pos_ind$r1_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_pos_ind = rownames_to_column(r1_pos_ind,var = "ROI")
+
+write.table(r1_pos_ind, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_ind_sub1_pos.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_pos_ind = as.data.frame(res_fdr[4])
+r2_pos_ind$r2_pos_pval = as.numeric(r2_pos_ind$r2_pos_pval)
+r2_pos_ind$r2_pos_pval = format(r2_pos_ind$r2_pos_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_pos_ind = rownames_to_column(r2_pos_ind,var = "ROI")
+
+write.table(r2_pos_ind, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_ind_sub2_pos.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r1_neg_ind = as.data.frame(res_fdr[5])
+r1_neg_ind$r1_neg_pval = as.numeric(r1_neg_ind$r1_neg_pval)
+r1_neg_ind$r1_neg_pval = format(r1_neg_ind$r1_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r1_neg_ind = rownames_to_column(r1_neg_ind,var = "ROI")
+
+write.table(r1_neg_ind, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_ind_sub1_neg.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+r2_neg_ind = as.data.frame(res_fdr[6])
+r2_neg_ind$r2_neg_pval = as.numeric(r2_neg_ind$r2_neg_pval)
+r2_neg_ind$r2_neg_pval = format(r2_neg_ind$r2_neg_pval, nsmall = 3, decimal.mark = ".", big.mark = ",")
+r2_neg_ind = rownames_to_column(r2_neg_ind,var = "ROI")
+
+write.table(r2_neg_ind, "/Volumes/methlab/Students/Jente/Scripts_ASD_paper/python_scripts/ASD_model/results/p_values_ind_sub2_neg.csv", append = FALSE, sep = ",", dec = ".", col.names = TRUE, row.names=TRUE, quote = FALSE)
+
+
+
+```
+
+### Subcortical maps
+
+Overlap
+
+```{r}
+z_scores_fdr_subcortical = data_z_scores_fdr[152:175] # Load data
+
+## Load in atlas data provided by ggseg package
+atlas      = as_tibble(aseg)
+
+manual_mapping <- c(
+  "Left._Cerebellum.White.Matter" = "Left.cerebellum white matter",
+  "Left._Cerebellum.Cortex" = "Left.cerebellum cortex",
+  "Left._Thalamus" = "Left.thalamus proper",
+  "Left._Caudate" = "Left.caudate",
+  "Left._Putamen" = "Left.putamen",
+  "Left._Pallidum" = "Left.pallidum",
+  "Brain_.Stem" = "Brain stem",
+  "Left._Hippocampus" = "Left.hippocampus",
+  "Left._Amygdala" = "Left.amygdala",
+  "Left._Accumbens.area" = "Left.accumbens area",
+  "Left._VentralDC" = "Left.ventral DC",
+  "Right_.Cerebellum.White.Matter" = "Right.cerebellum white matter",
+  "Right_.Cerebellum.Cortex" = "Right.cerebellum cortex",
+  "Right_.Thalamus" = "Right.thalamus proper",
+  "Right_.Caudate" = "Right.caudate",
+  "Right_.Putamen" = "Right.putamen",
+  "Right_.Pallidum" = "Right.pallidum",
+  "Right_.Hippocampus" = "Right.hippocampus",
+  "Right_.Amygdala" = "Right.amygdala",
+  "Right_.Accumbens.area" = "Right.accumbens area",
+  "Right_.VentralDC" = "Right.ventral DC",
+  "Left._Striatum" = "Left.striatum",
+  "Right_.Striatum" = "Right.striatum",
+  "group" = "group"
+)
+
+# Rename the columns using the manual mapping
+colnames(z_scores_fdr_subcortical) <- manual_mapping[colnames(z_scores_fdr_subcortical)]
+
+
+z_scores_fdr_subcortical_sub1 = filter(z_scores_fdr_subcortical, z_scores_fdr_subcortical$group=="Subgroup_1")[1:23]
+z_scores_fdr_subcortical_sub2 = filter(z_scores_fdr_subcortical, z_scores_fdr_subcortical$group=="Subgroup_2")[1:23]
+z_scores_fdr_subcortical_ASD = filter(z_scores_fdr_subcortical, z_scores_fdr_subcortical$group=="Subgroup_1" | z_scores_fdr_subcortical$group=="Subgroup_2" | z_scores_fdr_subcortical$group=="Autism")[1:23]
+
+# Create a function to calculate the percentage of values above or below a threshold
+calculate_percentage_above_below <- function(x, above_threshold, below_threshold) {
+  above_percentage <- sum(x > above_threshold, na.rm = TRUE) / sum(!is.na(x)) * 100
+  below_percentage <- sum(x < below_threshold, na.rm = TRUE) / sum(!is.na(x)) * 100
+  return(c(above_percentage, below_percentage))
+}
+
+# Calculate the percentages for z-scores above 1 and below -1
+percentage_fdr_sub1 <- data.frame()
+
+for (col_name in colnames(z_scores_fdr_subcortical_sub1)) {
+  percentages <- calculate_percentage_above_below(z_scores_fdr_subcortical_sub1[[col_name]], 1, -1)
+  
+  new_row <- data.frame(Column = col_name, `Above_1` = percentages[1], `Below_-1` = percentages[2])
+  percentage_fdr_sub1 <- rbind(percentage_fdr_sub1, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_fdr_sub1 <- transform(percentage_fdr_sub1, 
+                             hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                           ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                             region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_fdr_sub1 <- subset(percentage_fdr_sub1, select = -Column)
+
+# Calculate the percentages for z-scores above 1 and below -1
+percentage_fdr_sub2 <- data.frame()
+
+for (col_name in colnames(z_scores_fdr_subcortical_sub2)) {
+  percentages <- calculate_percentage_above_below(z_scores_fdr_subcortical_sub2[[col_name]], 1, -1)
+  
+  new_row <- data.frame(Column = col_name, `Above_1` = percentages[1], `Below_-1` = percentages[2])
+  percentage_fdr_sub2 <- rbind(percentage_fdr_sub2, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_fdr_sub2 <- transform(percentage_fdr_sub2, 
+                             hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                           ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                             region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_fdr_sub2 <- subset(percentage_fdr_sub2, select = -Column)
+
+
+# Calculate the percentages for z-scores above 1 and below -1
+percentage_fdr_ASD <- data.frame()
+
+for (col_name in colnames(z_scores_fdr_subcortical_ASD)) {
+  percentages <- calculate_percentage_above_below(z_scores_fdr_subcortical_ASD[[col_name]], 1, -1)
+  
+  new_row <- data.frame(Column = col_name, `Above_1` = percentages[1], `Below_.1` = percentages[2])
+  percentage_fdr_ASD <- rbind(percentage_fdr_ASD, new_row)
+}
+
+# Split "Column" column into "hemi" and "region" columns
+percentage_fdr_ASD <- transform(percentage_fdr_ASD, 
+                            hemi = ifelse(grepl("^Left\\.", Column), "left", 
+                                          ifelse(grepl("^Right\\.", Column), "right", "midline")),
+                            region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", Column))) 
+
+# Drop the original "Column" column
+percentage_fdr_ASD <- subset(percentage_fdr_ASD, select = -Column)
+
+#We have to change the cerebellum. In atlas only one value and in midline. We'll take the average.
+percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum cortex"] = (percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum cortex" & percentage_fdr_ASD$hemi=="left"] +  percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum cortex"& percentage_fdr_ASD$hemi=="right"] / 2)
+
+percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum cortex"] = (percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum cortex" & percentage_fdr_ASD$hemi=="left"] +  percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum cortex"& percentage_fdr_ASD$hemi=="right"] / 2)
+
+percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum white matter"] = (percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum white matter" & percentage_fdr_ASD$hemi=="left"] +  percentage_fdr_ASD$Above_1[percentage_fdr_ASD$region=="cerebellum white matter"& percentage_fdr_ASD$hemi=="right"] / 2)
+
+percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum white matter"] = (percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum white matter" & percentage_fdr_ASD$hemi=="left"] +  percentage_fdr_ASD$Below_.1[percentage_fdr_ASD$region=="cerebellum white matter"& percentage_fdr_ASD$hemi=="right"] / 2)
+
+percentage_fdr_ASD$hemi[percentage_fdr_ASD$region=="cerebellum cortex"]= "midline"
+percentage_fdr_ASD$hemi[percentage_fdr_ASD$region=="cerebellum white matter"]= "midline"
+
+percentage_fdr_ASD = subset(percentage_fdr_ASD, !duplicated(percentage_fdr_ASD))
+
+
+percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum cortex"] = (percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum cortex" & percentage_fdr_sub1$hemi=="left"] +  percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum cortex"& percentage_fdr_sub1$hemi=="right"] / 2)
+
+percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum cortex"] = (percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum cortex" & percentage_fdr_sub1$hemi=="left"] +  percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum cortex"& percentage_fdr_sub1$hemi=="right"] / 2)
+
+percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum white matter"] = (percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum white matter" & percentage_fdr_sub1$hemi=="left"] +  percentage_fdr_sub1$Above_1[percentage_fdr_sub1$region=="cerebellum white matter"& percentage_fdr_sub1$hemi=="right"] / 2)
+
+percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum white matter"] = (percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum white matter" & percentage_fdr_sub1$hemi=="left"] +  percentage_fdr_sub1$Below_.1[percentage_fdr_sub1$region=="cerebellum white matter"& percentage_fdr_sub1$hemi=="right"] / 2)
+
+percentage_fdr_sub1$hemi[percentage_fdr_sub1$region=="cerebellum cortex"]= "midline"
+percentage_fdr_sub1$hemi[percentage_fdr_sub1$region=="cerebellum white matter"]= "midline"
+
+percentage_fdr_sub1 = subset(percentage_fdr_sub1, !duplicated(percentage_fdr_sub1))
+
+percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum cortex"] = (percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum cortex" & percentage_fdr_sub2$hemi=="left"] +  percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum cortex"& percentage_fdr_sub2$hemi=="right"] / 2)
+
+percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum cortex"] = (percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum cortex" & percentage_fdr_sub2$hemi=="left"] +  percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum cortex"& percentage_fdr_sub2$hemi=="right"] / 2)
+
+percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum white matter"] = (percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum white matter" & percentage_fdr_sub2$hemi=="left"] +  percentage_fdr_sub2$Above_1[percentage_fdr_sub2$region=="cerebellum white matter"& percentage_fdr_sub2$hemi=="right"] / 2)
+
+percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum white matter"] = (percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum white matter" & percentage_fdr_sub2$hemi=="left"] +  percentage_fdr_sub2$Below_.1[percentage_fdr_sub2$region=="cerebellum white matter"& percentage_fdr_sub2$hemi=="right"] / 2)
+
+percentage_fdr_sub2$hemi[percentage_fdr_sub2$region=="cerebellum cortex"]= "midline"
+percentage_fdr_sub2$hemi[percentage_fdr_sub2$region=="cerebellum white matter"]= "midline"
+
+percentage_fdr_sub2 = subset(percentage_fdr_sub2, !duplicated(percentage_fdr_sub2))
+
+
+
+atlas_data_fdr_ASD = merge(atlas, percentage_fdr_ASD, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_fdr_sub1 = merge(atlas, percentage_fdr_sub1, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_fdr_sub2 = merge(atlas, percentage_fdr_sub2, by=c("region", "hemi"), all.x=TRUE)
+
+# Fill missing values with 0 in the columns Above_1 and Below_.1
+atlas_data_fdr_ASD$Above_1[is.na(atlas_data_fdr_ASD$Above_1)] <- 0
+atlas_data_fdr_ASD$Below_.1[is.na(atlas_data_fdr_ASD$Below_.1)] <- 0
+atlas_data_fdr_sub1$Above_1[is.na(atlas_data_fdr_sub1$Above_1)] <- 0
+atlas_data_fdr_sub1$Below_.1[is.na(atlas_data_fdr_sub1$Below_.1)] <- 0
+atlas_data_fdr_sub2$Above_1[is.na(atlas_data_fdr_sub2$Above_1)] <- 0
+atlas_data_fdr_sub2$Below_.1[is.na(atlas_data_fdr_sub2$Below_.1)] <- 0
+
+# Reorder rows of atlas_data_fdr_ASD based on the order in the atlas
+atlas_data_fdr_ASD <- atlas_data_fdr_ASD[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_ASD$region, atlas_data_fdr_ASD$hemi)), ]
+atlas_data_fdr_sub1 <- atlas_data_fdr_sub1[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub1$region, atlas_data_fdr_sub1$hemi)), ]
+atlas_data_fdr_sub2 <- atlas_data_fdr_sub2[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub2$region, atlas_data_fdr_sub2$hemi)), ]
+
+## Plot atlas:
+
+# Define the color limits based on the range you want
+color_limits <- c(0, 8)  # Replace with the desired range
+
+# Create a custom color palette with a white-to-blue gradient
+custom_palette <- colorRampPalette(c("white", brewer.pal(8, "GnBu")))(9)
+
+# Positive deviations ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_ASD,
+    mapping = aes(fill = Above_1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_pos_ASD_subcortical.png")
+
+
+# Negative deviations ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_ASD,
+    mapping = aes(fill = Below_.1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_neg_ASD_subcortical.png")
+
+
+# Positive deviations sub1
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub1,
+    mapping = aes(fill = Above_1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_pos_sub1_subcortical.png")
+
+
+# Negative deviations sub1
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub1,
+    mapping = aes(fill = Below_.1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_neg_sub1_subcortical.png")
+
+
+
+# Positive deviations sub2
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub2,
+    mapping = aes(fill = Above_1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_pos_sub2_subcortical.png")
+
+
+# Negative deviations sub2
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub2,
+    mapping = aes(fill = Below_.1),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = custom_palette,
+    limits = color_limits  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/overlap_fdr_neg_sub2_subcortical.png")
+
+
+```
+
+p_value maps
+
+```{r}
+p_values_fdr_subcortical_sub1vsASD_pos = r1_pos_ind[151:173,] # Load data
+p_values_fdr_subcortical_sub1vsASD_neg = r1_neg_ind[151:173,] # Load data
+p_values_fdr_subcortical_sub2vsASD_pos = r2_pos_ind[151:173,] # Load data
+p_values_fdr_subcortical_sub2vsASD_neg = r2_neg_ind[151:173,] # Load data
+
+
+## Load in atlas data provided by ggseg package
+atlas      = as_tibble(aseg)
+
+
+# Rename the ROIs using the manual mapping
+p_values_fdr_subcortical_sub1vsASD_pos$ROI <- manual_mapping[p_values_fdr_subcortical_sub1vsASD_pos$ROI]
+p_values_fdr_subcortical_sub1vsASD_neg$ROI <- manual_mapping[p_values_fdr_subcortical_sub1vsASD_neg$ROI]
+p_values_fdr_subcortical_sub2vsASD_pos$ROI <- manual_mapping[p_values_fdr_subcortical_sub2vsASD_pos$ROI]
+p_values_fdr_subcortical_sub2vsASD_neg$ROI <- manual_mapping[p_values_fdr_subcortical_sub2vsASD_neg$ROI]
+
+
+# Split "ROI" ROI into "hemi" and "region" ROIs
+p_values_fdr_subcortical_sub1vsASD_pos <- transform(p_values_fdr_subcortical_sub1vsASD_pos, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+# Drop the original "ROI" ROI
+p_values_fdr_subcortical_sub1vsASD_pos <- subset(p_values_fdr_subcortical_sub1vsASD_pos, select = -ROI)
+
+p_values_fdr_subcortical_sub1vsASD_neg <- transform(p_values_fdr_subcortical_sub1vsASD_neg, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_fdr_subcortical_sub1vsASD_neg <- subset(p_values_fdr_subcortical_sub1vsASD_neg, select = -ROI)
+
+p_values_fdr_subcortical_sub2vsASD_pos <- transform(p_values_fdr_subcortical_sub2vsASD_pos, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_fdr_subcortical_sub2vsASD_pos <- subset(p_values_fdr_subcortical_sub2vsASD_pos, select = -ROI)
+
+p_values_fdr_subcortical_sub2vsASD_neg <- transform(p_values_fdr_subcortical_sub2vsASD_neg, 
+                                                hemi = ifelse(grepl("^Left\\.", ROI), "left", 
+                                                              ifelse(grepl("^Right\\.", ROI), "right", "midline")),
+                                                region = sub("^(Left\\.|Right\\.)", "", sub(".*\\.", "", ROI))) 
+
+p_values_fdr_subcortical_sub2vsASD_neg <- subset(p_values_fdr_subcortical_sub2vsASD_neg, select = -ROI)
+
+#Change p values to numeric
+p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval = as.numeric(p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval)
+p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval = as.numeric(p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval)
+p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval = as.numeric(p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval)
+p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval = as.numeric(p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval)
+
+#We have to change the cerebellum. In atlas only one value and in midline. We'll take the average.
+p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum cortex"] = min(c(p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum cortex" & p_values_fdr_subcortical_sub1vsASD_pos$hemi=="left"],  p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum cortex"& p_values_fdr_subcortical_sub1vsASD_pos$hemi=="right"]))
+
+p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum cortex"] = min(c(p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum cortex" & p_values_fdr_subcortical_sub1vsASD_neg$hemi=="left"], p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum cortex"& p_values_fdr_subcortical_sub1vsASD_neg$hemi=="right"]))
+
+p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum cortex"] = min(c(p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum cortex" & p_values_fdr_subcortical_sub2vsASD_pos$hemi=="left"], p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum cortex"& p_values_fdr_subcortical_sub2vsASD_pos$hemi=="right"]))
+
+p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum cortex"] = min(c(p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum cortex" & p_values_fdr_subcortical_sub2vsASD_neg$hemi=="left"],  p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum cortex"& p_values_fdr_subcortical_sub2vsASD_neg$hemi=="right"]))
+
+p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum white matter"] = min(c(p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum white matter" & p_values_fdr_subcortical_sub1vsASD_pos$hemi=="left"], p_values_fdr_subcortical_sub1vsASD_pos$r1_pos_pval[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum white matter"& p_values_fdr_subcortical_sub1vsASD_pos$hemi=="right"]))
+
+p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum white matter"] = min(c(p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum white matter" & p_values_fdr_subcortical_sub1vsASD_neg$hemi=="left"], p_values_fdr_subcortical_sub1vsASD_neg$r1_neg_pval[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum white matter"& p_values_fdr_subcortical_sub1vsASD_neg$hemi=="right"]))
+
+p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum white matter"] = min(c(p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum white matter" & p_values_fdr_subcortical_sub2vsASD_pos$hemi=="left"], p_values_fdr_subcortical_sub2vsASD_pos$r2_pos_pval[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum white matter"& p_values_fdr_subcortical_sub2vsASD_pos$hemi=="right"]))
+
+p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum white matter"] = min(c(p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum white matter" & p_values_fdr_subcortical_sub2vsASD_neg$hemi=="left"], p_values_fdr_subcortical_sub2vsASD_neg$r2_neg_pval[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum white matter"& p_values_fdr_subcortical_sub2vsASD_neg$hemi=="right"]))
+
+
+
+p_values_fdr_subcortical_sub1vsASD_pos$hemi[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum cortex"]= "midline"
+p_values_fdr_subcortical_sub1vsASD_pos$hemi[p_values_fdr_subcortical_sub1vsASD_pos$region=="cerebellum white matter"]= "midline"
+p_values_fdr_subcortical_sub1vsASD_neg$hemi[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum cortex"]= "midline"
+p_values_fdr_subcortical_sub1vsASD_neg$hemi[p_values_fdr_subcortical_sub1vsASD_neg$region=="cerebellum white matter"]= "midline"
+p_values_fdr_subcortical_sub2vsASD_pos$hemi[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum cortex"]= "midline"
+p_values_fdr_subcortical_sub2vsASD_pos$hemi[p_values_fdr_subcortical_sub2vsASD_pos$region=="cerebellum white matter"]= "midline"
+p_values_fdr_subcortical_sub2vsASD_neg$hemi[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum cortex"]= "midline"
+p_values_fdr_subcortical_sub2vsASD_neg$hemi[p_values_fdr_subcortical_sub2vsASD_neg$region=="cerebellum white matter"]= "midline"
+
+p_values_fdr_subcortical_sub1vsASD_pos = subset(p_values_fdr_subcortical_sub1vsASD_pos, !duplicated(p_values_fdr_subcortical_sub1vsASD_pos))
+p_values_fdr_subcortical_sub1vsASD_neg = subset(p_values_fdr_subcortical_sub1vsASD_neg, !duplicated(p_values_fdr_subcortical_sub1vsASD_neg))
+p_values_fdr_subcortical_sub2vsASD_pos = subset(p_values_fdr_subcortical_sub2vsASD_pos, !duplicated(p_values_fdr_subcortical_sub2vsASD_pos))
+p_values_fdr_subcortical_sub2vsASD_neg = subset(p_values_fdr_subcortical_sub2vsASD_neg, !duplicated(p_values_fdr_subcortical_sub2vsASD_neg))
+
+
+
+atlas_data_fdr_sub1vsASD_pos = merge(atlas, p_values_fdr_subcortical_sub1vsASD_pos, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_fdr_sub1vsASD_neg = merge(atlas, p_values_fdr_subcortical_sub1vsASD_neg, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_fdr_sub2vsASD_pos = merge(atlas, p_values_fdr_subcortical_sub2vsASD_pos, by=c("region", "hemi"), all.x=TRUE)
+atlas_data_fdr_sub2vsASD_neg = merge(atlas, p_values_fdr_subcortical_sub2vsASD_neg, by=c("region", "hemi"), all.x=TRUE)
+
+atlas_data_fdr_sub1vsASD_pos$r1_pos_pval[is.na(atlas_data_fdr_sub1vsASD_pos$r1_pos_pval)] <- 1
+atlas_data_fdr_sub1vsASD_neg$r1_neg_pval[is.na(atlas_data_fdr_sub1vsASD_neg$r1_neg_pval)] <- 1
+atlas_data_fdr_sub2vsASD_pos$r2_pos_pval[is.na(atlas_data_fdr_sub2vsASD_pos$r2_pos_pval)] <- 1
+atlas_data_fdr_sub2vsASD_neg$r2_neg_pval[is.na(atlas_data_fdr_sub2vsASD_neg$r2_neg_pval)] <- 1
+
+# Reorder rows of atlas_data_fdr_ASD based on the order in the atlas
+atlas_data_fdr_sub1vsASD_pos <- atlas_data_fdr_sub1vsASD_pos[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub1vsASD_pos$region, atlas_data_fdr_sub1vsASD_pos$hemi)),]
+atlas_data_fdr_sub1vsASD_neg <- atlas_data_fdr_sub1vsASD_neg[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub1vsASD_neg$region, atlas_data_fdr_sub1vsASD_neg$hemi)),]
+atlas_data_fdr_sub2vsASD_pos <- atlas_data_fdr_sub2vsASD_pos[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub2vsASD_pos$region, atlas_data_fdr_sub2vsASD_pos$hemi)),]
+atlas_data_fdr_sub2vsASD_neg <- atlas_data_fdr_sub2vsASD_neg[match(paste(atlas$region, atlas$hemi), paste(atlas_data_fdr_sub2vsASD_neg$region, atlas_data_fdr_sub2vsASD_neg$hemi)),]
+
+## Plot atlas:
+
+# Define the color limits for p-values
+p_value_limits <- c(0.001, 0.05)  # Adjust as needed
+
+# Create a custom color palette using the OrRd_r color palette
+custom_palette <- rev(brewer.pal(9, "OrRd"))
+
+# Positive deviations sub1 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub1vsASD_pos,
+    mapping = aes(fill = r1_pos_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_fdr_pos_ASDvssub1_subcortical.png")
+
+
+
+
+# Negative deviations sub1 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub1vsASD_neg,
+    mapping = aes(fill = r1_neg_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_fdr_neg_ASDvssub1_subcortical.png")
+
+
+# Positive deviations sub2 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub2vsASD_pos,
+    mapping = aes(fill = r2_pos_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_fdr_pos_ASDvssub2_subcortical.png")
+
+
+# Negative deviations sub2 vs ASD
+ggplot() +
+  geom_brain(
+    atlas = atlas_data_fdr_sub2vsASD_neg,
+    mapping = aes(fill = r2_neg_pval),
+    color = 'black',
+    size = 0.49,
+    show.legend = TRUE  # Set to TRUE to show the legend
+  ) +
+  theme_void() +
+  scale_fill_gradientn(
+    colors = c(custom_palette, "white"),
+    limits = p_value_limits,
+    oob = scales::squish  # Set the color scale limits
+  ) +
+  labs(fill = "Color Scale Title")  # Customize the legend title
+
+ggsave("/Users/jentemeijer/Downloads/pvalue_fdr_neg_ASDvssub2_subcortical.png")
+
+```
+
+# Methods
+
+Exclusion numbers
+
+```{r}
+
+## Missing FIQ
+length(data_normative_CT$SUB_ID[is.na(data_normative_CT$FIQ) & data_normative_CT$DX_GROUP==1]) #ASD
+length(data_normative_CT$SUB_ID[is.na(data_normative_CT$FIQ) & data_normative_CT$DX_GROUP==2]) #TC
+
+
+## Specific sites with less than 10 participants
+length(ABIDE_pheno_clean$SITE_ID[
+  (ABIDE_pheno_clean$SITE_ID == "SBL" | ABIDE_pheno_clean$SITE_ID == "SDSU" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-KUL_3" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-IP_1" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-SDSU" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-NYU_2") &
+  ABIDE_pheno_clean$SUB_ID %in% data_normative_CT$SUB_ID &
+  !is.na(ABIDE_pheno_clean$FIQ)
+])
+
+View(filter(ABIDE_pheno_clean,
+  (ABIDE_pheno_clean$SITE_ID == "SBL" | ABIDE_pheno_clean$SITE_ID == "SDSU" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-KUL_3" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-IP_1" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-SDSU" | ABIDE_pheno_clean$SITE_ID == "ABIDEII-NYU_2") &
+  ABIDE_pheno_clean$SUB_ID %in% data_normative_CT$SUB_ID &
+  !is.na(ABIDE_pheno_clean$FIQ)))
+
+
+## Missing neuro imaging data
+nrow(ABIDE1_pheno) + nrow(ABIDE2_pheno) - nrow(CT_Destrieux_ABIDE1) - nrow(CT_Destrieux_ABIDE2)
+
+View(filter(ABIDE1_pheno, !ABIDE1_pheno$SUB_ID %in% CT_Destrieux_ABIDE1$SUB_ID & ABIDE1_pheno$SEX==1))
+
+#26 total, 19 ASD, 7 TC
+
+View(filter(ABIDE2_pheno, !ABIDE2_pheno$SUB_ID %in% CT_Destrieux_ABIDE2$SUB_ID & ABIDE2_pheno$SEX==1))
+
+#62 total, 32 ASD, 30 TC
+
+# So 19 + 32 = 51 ASD and 7+30 = 37 TC
+
+
+## Numbers of ADOS-G and ADOS-2 
+# Total
+nrow(na.omit(ABIDE1_pheno[c("ADOS_GOTHAM_SOCAFFECT", "ADOS_GOTHAM_RRB", "ADOS_GOTHAM_TOTAL")])) + nrow(na.omit(ABIDE2_pheno[c("ADOS_2_SOCAFFECT", "ADOS_2_RRB", "ADOS_2_TOTAL")])) #ADOS 2
+
+nrow(na.omit(ABIDE1_pheno[c( "ADOS_COMM", "ADOS_SOCIAL", "ADOS_STEREO_BEHAV", "ADOS_TOTAL")])) + nrow(na.omit(ABIDE2_pheno[c("ADOS_MODULE", "ADOS_G_COMM", "ADOS_G_SOCIAL", "ADOS_G_STEREO_BEHAV", "ADOS_G_TOTAL")])) #ADOS_G
+
+# seperate for datasets
+nrow(na.omit(ABIDE1_pheno[c("ADOS_GOTHAM_SOCAFFECT", "ADOS_GOTHAM_RRB", "ADOS_GOTHAM_TOTAL")])) # ADOS 2, ABIDE 1
+
+nrow(na.omit(ABIDE2_pheno[c("ADOS_2_SOCAFFECT", "ADOS_2_RRB", "ADOS_2_TOTAL")])) #ADOS 2, ABIDE 2
+
+nrow(na.omit(ABIDE1_pheno[c( "ADOS_COMM", "ADOS_SOCIAL", "ADOS_STEREO_BEHAV", "ADOS_TOTAL")])) #ADOS_G, ABIDE1
+
+nrow(na.omit(ABIDE2_pheno[c("ADOS_MODULE", "ADOS_G_COMM", "ADOS_G_SOCIAL", "ADOS_G_STEREO_BEHAV", "ADOS_G_TOTAL")])) #ADOS_G, ABIDE2
+
+
+```
